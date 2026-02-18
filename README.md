@@ -53,3 +53,7 @@ Spamblock is structured to support multiple spam-check providers internally.
 ## Notes
 - Local osTicket config is stored in `.osticket/` and is intentionally ignored by git.
 - This is a development setup; hardening (locking down `setup/`, file permissions, production mail, etc.) comes later.
+
+## License
+This project is licensed under the **Say Thanks License**.
+If you find this useful, [click here to say thanks!](https://saythanks.io/to/rmaclean)
