@@ -1,0 +1,9 @@
+.DS_Store
+
+.osticket/
+
+# If you later add node tooling
+node_modules/
+
+# If you later add PHP tooling
+vendor/
