@@ -4,6 +4,7 @@ This repository is for an osTicket plugin named `spamblock`.
 ## Goals
 - Build an osTicket plugin that performs spam checks on newly-created tickets.
 - Keep local development reproducible via Docker.
+- Prefer an internal provider architecture so spam-check implementations can be swapped/augmented later without UI changes.
 
 ## Repository layout
 - `plugin/spamblock/`: plugin source (eventually packaged as a `.phar`, but can be developed as a folder)
@@ -25,3 +26,8 @@ This repository is for an osTicket plugin named `spamblock`.
 - osTicket discovers plugins from `include/plugins/`.
 - A plugin can be a directory (during development) or a `.phar` (for distribution).
 - Plugins are configured/enabled via the Admin Panel: Manage → Plugins.
+
+## Spamblock design notes
+- Spamblock currently uses Postmark Spamcheck (see `plugin/spamblock/lib/spamcheck.php`).
+- Spamblock logs every inbound email’s score to the osTicket system log for tuning.
+- Spamblock blocks tickets by setting `spamblock_should_block` during `ticket.create.before` and relying on an internal Ticket Filter (`Spamblock: block by score`) to reject ticket creation.

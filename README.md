@@ -1,8 +1,35 @@
 # spamblock (osTicket plugin)
-A plugin for osTicket that will run a spam check for any newly-created ticket.
+A plugin for osTicket that spam-checks inbound email tickets and blocks them over a configurable score threshold.
+
+## What it does
+- Intercepts ticket creation for tickets created from email (via the `ticket.create.before` signal).
+- Calls Postmark’s Spamcheck API (`https://spamcheck.postmarkapp.com/filter`).
+- Logs every checked email with:
+  - message-id (`mid`)
+  - sender (`from`)
+  - subject
+  - spam score
+  - whether it would be blocked
+- Blocks tickets when `score >= min_block_score`.
+
+## Configuration
+In osTicket: Admin Panel → Manage → Plugins → Spamblock
+- `Minimum spam score to block`
+
+## How blocking works (implementation detail)
+Spamblock sets two internal fields on inbound email ticket creation:
+- `spamblock_score`
+- `spamblock_should_block` (`0` or `1`)
+
+On startup, Spamblock creates (or updates) an osTicket Ticket Filter named `Spamblock: block by score` that rejects tickets when `spamblock_should_block == 1`.
+
+## Provider architecture (implementation detail)
+Spamblock is structured to support multiple spam-check providers internally.
+- Provider interface + Postmark implementation live in `plugin/spamblock/lib/spamcheck.php`.
+- Providers are composed into a collection (currently just Postmark). In the future, additional providers can be added to the provider list without changing any UI.
 
 ## What’s in this repo
-- `plugin/spamblock/`: plugin source code (empty scaffold for now)
+- `plugin/spamblock/`: plugin source code
 - `docker/osticket/`: a Dockerfile that builds an osTicket container for local testing
 - `docker-compose.yml`: osTicket + MariaDB stack for local development
 - `.prompts/`: prompt history for changes made to this repo

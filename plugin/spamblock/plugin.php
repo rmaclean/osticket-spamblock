@@ -2,9 +2,9 @@
 
 return [
     'id' => 'spamblock',
-    'version' => '0.0.1',
+    'version' => '0.1.0',
     'name' => 'Spamblock',
     'author' => 'spamblock',
-    'description' => 'Hello world plugin scaffold for spamblock.',
+    'description' => 'Spam-check inbound email tickets and block them over a configurable score threshold.',
     'plugin' => 'spamblock.php:SpamblockPlugin',
 ];
