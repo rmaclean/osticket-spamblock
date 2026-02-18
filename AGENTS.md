@@ -8,7 +8,7 @@ This repository is for an osTicket plugin named `spamblock`.
 ## Repository layout
 - `plugin/spamblock/`: plugin source (eventually packaged as a `.phar`, but can be developed as a folder)
 - `docker/osticket/`: Docker build context for a local osTicket instance
-- `.prompts/`: a running log of prompts used to drive changes in this repo
+- `.prompts/`: a running log of prompts used to drive changes in this repo (always add a new entry for each prompt that results in code/content changes)
 - `.osticket/`: local-only (ignored by git) runtime state such as `include/ost-config.php`
 
 ## Local development
