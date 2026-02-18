@@ -5,9 +5,17 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -15,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -24,7 +35,7 @@ jobs:
           ini-values: phar.readonly=0
 
       - name: Build PHAR
-        run: php scripts/build-phar.php --tag "${GITHUB_REF_NAME}" --out dist/spamblock.phar
+        run: php scripts/build-phar.php --tag "${{ env.RELEASE_TAG }}" --out dist/spamblock.phar
 
       - name: Generate checksum
         run: sha256sum dist/spamblock.phar > dist/spamblock.phar.sha256
@@ -32,6 +43,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/spamblock.phar
             dist/spamblock.phar.sha256
