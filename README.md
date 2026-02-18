@@ -1,6 +1,16 @@
 # spamblock (osTicket plugin)
 A plugin for osTicket that spam-checks inbound email tickets and blocks them over a configurable score threshold.
 
+## Installation (GitHub Releases)
+1. Download `spamblock.phar` from this repo’s **Releases** page.
+2. Copy it into your osTicket installation’s `include/plugins/` directory.
+   - Example path: `<osticket-root>/include/plugins/spamblock.phar`
+3. In osTicket: Admin Panel → Manage → Plugins → Install/Enable **Spamblock**.
+
+Notes:
+- The `.phar` file must be readable by the web server user.
+- PHP must have PHAR support enabled (most distributions do).
+
 ## What it does
 - Intercepts ticket creation for tickets created from email (via the `ticket.create.before` signal).
 - Calls Postmark’s Spamcheck API (`https://spamcheck.postmarkapp.com/filter`).
@@ -49,6 +59,11 @@ Spamblock is structured to support multiple spam-check providers internally.
 - Develop the plugin in `plugin/spamblock/`.
 - The `./plugin` folder is bind-mounted into the osTicket container at `include/plugins/`.
 - Enable/configure the plugin in osTicket via Admin Panel → Manage → Plugins.
+
+## Building the PHAR locally
+This repo includes a small build script that packages `plugin/spamblock/` into `dist/spamblock.phar`.
+
+- `php -d phar.readonly=0 scripts/build-phar.php --out dist/spamblock.phar`
 
 ## Notes
 - Local osTicket config is stored in `.osticket/` and is intentionally ignored by git.

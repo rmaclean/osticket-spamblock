@@ -1,0 +1,39 @@
+name: Release PHAR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          ini-values: phar.readonly=0
+
+      - name: Build PHAR
+        run: php scripts/build-phar.php --tag "${GITHUB_REF_NAME}" --out dist/spamblock.phar
+
+      - name: Generate checksum
+        run: sha256sum dist/spamblock.phar > dist/spamblock.phar.sha256
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/spamblock.phar
+            dist/spamblock.phar.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true

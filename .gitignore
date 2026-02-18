@@ -7,3 +7,6 @@ node_modules/
 
 # If you later add PHP tooling
 vendor/
+
+# Local build output
+/dist/
