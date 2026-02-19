@@ -41,6 +41,19 @@ Instead, it will emit a **warning** log entry for anything that *would have been
 
 This lets you tune thresholds safely by observing what would be blocked before turning blocking on.
 
+## Ticket UI
+On the staff ticket view, Spamblock adds:
+- A label in the ticket header: `Is Spam?` (Yes/No)
+- A popup (via the ticket “More” menu and the label) that shows per-provider scores (Spamcheck + SFS)
+
+In **Test Mode**, you’ll see real `Is Spam?` Yes/No values based on your configured thresholds.
+In normal mode, spam would typically be blocked before ticket creation, so you’ll usually see `No`.
+
+### "This is spam" button
+In the Spamblock popup there is a **This is spam** button (requires permissions to ban email + delete tickets). When clicked it:
+1. Adds the ticket’s email address to osTicket’s System Ban List
+2. Deletes the ticket
+
 ## How blocking works (implementation detail)
 Spamblock sets two internal fields on inbound email ticket creation:
 - `spamblock_score`

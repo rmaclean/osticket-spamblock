@@ -72,7 +72,7 @@ inject_message_id() {
 }
 
 set +e
-inject_message_id | docker compose exec -T osticket php -r 'chdir("/var/www/html/api"); require "api.inc.php"; require_once(INCLUDE_DIR . "api.tickets.php"); $raw = stream_get_contents(STDIN); $api = new TicketApiController("cli"); try { $res = $api->processEmail($raw); if (is_object($res) && method_exists($res, "getNumber")) { fwrite(STDOUT, "CREATED ticket=" . $res->getNumber() . PHP_EOL); exit(0); } fwrite(STDOUT, "OK (processed, non-ticket result)" . PHP_EOL); exit(0); } catch (TicketDenied $e) { fwrite(STDOUT, "DENIED (blocked/rejected)" . PHP_EOL); exit(2); }'
+inject_message_id | docker compose exec -T osticket php -d display_errors=1 -d error_reporting=E_ALL -r 'chdir("/var/www/html/api"); require "api.inc.php"; require_once(INCLUDE_DIR . "api.tickets.php"); $raw = stream_get_contents(STDIN); $api = new TicketApiController("cli"); try { $res = $api->processEmail($raw); if (is_object($res) && method_exists($res, "getNumber")) { fwrite(STDOUT, "CREATED ticket=" . $res->getNumber() . PHP_EOL); exit(0); } fwrite(STDOUT, "OK (processed, non-ticket result)" . PHP_EOL); exit(0); } catch (TicketDenied $e) { fwrite(STDOUT, "DENIED (blocked/rejected)" . PHP_EOL); exit(2); }'
 exit_code=$?
 set -e
 
