@@ -171,7 +171,7 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
             'timeout' => 8,
             'ignore_errors' => true,
             'header' => "Content-Type: application/json\r\n" .
-                "User-Agent: spamblock/0.2.0\r\n",
+                "User-Agent: spamblock/0.3.0\r\n",
             'content' => $payload,
         ];
 
@@ -286,7 +286,7 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
             'method' => 'GET',
             'timeout' => 8,
             'ignore_errors' => true,
-            'header' => "User-Agent: spamblock/0.2.0\r\n",
+            'header' => "User-Agent: spamblock/0.3.0\r\n",
         ];
 
         $ctx = stream_context_create([
