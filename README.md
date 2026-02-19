@@ -14,17 +14,22 @@ Notes:
 ## What it does
 - Intercepts ticket creation for tickets created from email (via the `ticket.create.before` signal).
 - Calls Postmark’s Spamcheck API (`https://spamcheck.postmarkapp.com/filter`).
+- Calls StopForumSpam (`https://api.stopforumspam.org/api`) with the sender email address and best-effort originating IP.
 - Logs every checked email with:
   - message-id (`mid`)
   - sender (`from`)
   - subject
-  - spam score
+  - Postmark spam score
+  - StopForumSpam confidence
   - whether it would be blocked
-- Blocks tickets when `score >= min_block_score`.
+- Blocks tickets when either:
+  - `postmark_score >= min_block_score`, or
+  - `sfs_confidence >= sfs_min_confidence`
 
 ## Configuration
 In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `Minimum spam score to block`
+- `SFS Minimum Confidence (%)`
 
 ## How blocking works (implementation detail)
 Spamblock sets two internal fields on inbound email ticket creation:

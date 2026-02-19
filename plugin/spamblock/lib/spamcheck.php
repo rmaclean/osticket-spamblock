@@ -7,14 +7,16 @@ class SpamblockEmailContext
     private $subject;
     private $header;
     private $message;
+    private $ip;
 
-    public function __construct($mid, $fromEmail, $subject, $header, $message)
+    public function __construct($mid, $fromEmail, $subject, $header, $message, $ip = '')
     {
         $this->mid = $mid;
         $this->fromEmail = $fromEmail;
         $this->subject = $subject;
         $this->header = $header;
         $this->message = $message;
+        $this->ip = $ip;
     }
 
     public static function fromTicketVars(array $vars)
@@ -29,7 +31,31 @@ class SpamblockEmailContext
             $message = (string) $message;
         }
 
-        return new self($mid, $fromEmail, $subject, $header, $message);
+        $ip = '';
+        foreach (['ip', 'ip_address', 'ipaddr', 'client_ip', 'clientip'] as $k) {
+            if (empty($vars[$k])) {
+                continue;
+            }
+
+            $ip = trim((string) $vars[$k]);
+            if ($ip !== '') {
+                break;
+            }
+        }
+
+        if ($ip === '' && $header !== '') {
+            if (preg_match('/^X-Originating-IP:\s*\[([^\]]+)\]/mi', $header, $m)) {
+                $ip = trim($m[1]);
+            } elseif (preg_match('/\[([0-9]{1,3}(?:\.[0-9]{1,3}){3})\]/', $header, $m)) {
+                $ip = trim($m[1]);
+            }
+        }
+
+        if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            $ip = '';
+        }
+
+        return new self($mid, $fromEmail, $subject, $header, $message, $ip);
     }
 
     public function getMid()
@@ -45,6 +71,11 @@ class SpamblockEmailContext
     public function getSubject()
     {
         return $this->subject;
+    }
+
+    public function getIp()
+    {
+        return $this->ip;
     }
 
     public function getRawEmail()
@@ -67,13 +98,15 @@ class SpamblockSpamCheckResult
     private $score;
     private $error;
     private $statusCode;
+    private $data;
 
-    public function __construct($provider, $score, $error = null, $statusCode = null)
+    public function __construct($provider, $score, $error = null, $statusCode = null, $data = null)
     {
         $this->provider = $provider;
         $this->score = $score;
         $this->error = $error;
         $this->statusCode = $statusCode;
+        $this->data = is_array($data) ? $data : [];
     }
 
     public function getProvider()
@@ -94,6 +127,11 @@ class SpamblockSpamCheckResult
     public function getStatusCode()
     {
         return $this->statusCode;
+    }
+
+    public function getData()
+    {
+        return $this->data;
     }
 }
 
@@ -204,6 +242,162 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
         }
 
         return 0;
+    }
+}
+
+class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
+{
+    private const ENDPOINT = 'https://api.stopforumspam.org/api';
+
+    public function getName()
+    {
+        return 'sfs';
+    }
+
+    public function check(SpamblockEmailContext $context)
+    {
+        $email = trim((string) $context->getFromEmail());
+        $ip = trim((string) $context->getIp());
+
+        $params = [
+            'json' => '1',
+            'confidence' => '1',
+        ];
+
+        if ($email !== '') {
+            $params['email'] = $email;
+        }
+
+        if ($ip !== '') {
+            $params['ip'] = $ip;
+        }
+
+        if (!isset($params['email']) && !isset($params['ip'])) {
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                'No email or IP available for StopForumSpam lookup'
+            );
+        }
+
+        $url = self::ENDPOINT . '?' . http_build_query($params);
+
+        $httpOptions = [
+            'method' => 'GET',
+            'timeout' => 8,
+            'ignore_errors' => true,
+            'header' => "User-Agent: spamblock/0.1.0\r\n",
+        ];
+
+        $ctx = stream_context_create([
+            'http' => $httpOptions,
+        ]);
+
+        $responseHeaders = null;
+        $responseBody = @file_get_contents($url, false, $ctx);
+        if (isset($http_response_header)) {
+            $responseHeaders = $http_response_header;
+        }
+
+        $status = $this->extractStatusCode($responseHeaders);
+        if ($responseBody === false) {
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                'Network error calling StopForumSpam',
+                $status
+            );
+        }
+
+        if ($status < 200 || $status >= 300) {
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                'Non-2xx response from StopForumSpam',
+                $status
+            );
+        }
+
+        $decoded = json_decode($responseBody, true);
+        if (!is_array($decoded)) {
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                'Unable to decode StopForumSpam response JSON',
+                $status
+            );
+        }
+
+        if (!isset($decoded['success']) || (int) $decoded['success'] !== 1) {
+            $err = isset($decoded['error']) ? (string) $decoded['error'] : 'StopForumSpam returned success=0';
+
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                $err,
+                $status
+            );
+        }
+
+        $emailData = isset($decoded['email']) && is_array($decoded['email']) ? $decoded['email'] : null;
+        $ipData = isset($decoded['ip']) && is_array($decoded['ip']) ? $decoded['ip'] : null;
+
+        $emailConfidence = $this->extractFloat($emailData, 'confidence');
+        $ipConfidence = $this->extractFloat($ipData, 'confidence');
+
+        $confidences = array_values(array_filter([$emailConfidence, $ipConfidence], function ($v) {
+            return $v !== null;
+        }));
+
+        $maxConfidence = $confidences ? max($confidences) : null;
+
+        $data = [
+            'email_confidence' => $emailConfidence,
+            'ip_confidence' => $ipConfidence,
+            'email_appears' => $this->extractInt($emailData, 'appears'),
+            'ip_appears' => $this->extractInt($ipData, 'appears'),
+            'email_frequency' => $this->extractInt($emailData, 'frequency'),
+            'ip_frequency' => $this->extractInt($ipData, 'frequency'),
+        ];
+
+        return new SpamblockSpamCheckResult(
+            $this->getName(),
+            $maxConfidence,
+            null,
+            $status,
+            $data
+        );
+    }
+
+    private function extractStatusCode($headers)
+    {
+        if (!$headers || !is_array($headers) || !$headers[0]) {
+            return 0;
+        }
+
+        if (preg_match('/HTTP\/[0-9.]+\s+(\d{3})/', $headers[0], $m)) {
+            return (int) $m[1];
+        }
+
+        return 0;
+    }
+
+    private function extractFloat($arr, $key)
+    {
+        if (!is_array($arr) || !isset($arr[$key]) || !is_numeric($arr[$key])) {
+            return null;
+        }
+
+        return (float) $arr[$key];
+    }
+
+    private function extractInt($arr, $key)
+    {
+        if (!is_array($arr) || !isset($arr[$key]) || !is_numeric($arr[$key])) {
+            return null;
+        }
+
+        return (int) $arr[$key];
     }
 }
 

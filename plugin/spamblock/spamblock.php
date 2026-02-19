@@ -33,6 +33,7 @@ class SpamblockPlugin extends Plugin
         if (!isset($this->spamChecker)) {
             $this->spamChecker = new SpamblockSpamChecker([
                 new SpamblockPostmarkSpamCheckProvider(),
+                new SpamblockStopForumSpamProvider(),
             ]);
         }
 
@@ -56,67 +57,117 @@ class SpamblockPlugin extends Plugin
             ? $config->getMinBlockScore()
             : 5.0;
 
+        $minSfsConfidence = ($config instanceof SpamblockConfig)
+            ? $config->getSfsMinConfidence()
+            : 90.0;
+
         $context = SpamblockEmailContext::fromTicketVars($vars);
         $results = $this->getSpamChecker()->check($context);
 
-        $best = null;
+        $byProvider = [];
         foreach ($results as $r) {
-            if ($r->getScore() === null) {
-                continue;
-            }
-
-            if ($best === null || $r->getScore() > $best->getScore()) {
-                $best = $r;
-            }
+            $byProvider[$r->getProvider()] = $r;
         }
 
-        $score = $best ? $best->getScore() : null;
-        $provider = $best ? $best->getProvider() : null;
+        $postmark = $byProvider['postmark'] ?? null;
+        $postmarkScore = $postmark ? $postmark->getScore() : null;
+        $postmarkShouldBlock = ($postmarkScore !== null && $postmarkScore >= $minScoreToBlock);
 
-        $shouldBlock = ($score !== null && $score >= $minScoreToBlock);
+        $sfs = $byProvider['sfs'] ?? null;
+        $sfsConfidence = $sfs ? $sfs->getScore() : null;
+        $sfsShouldBlock = ($sfsConfidence !== null && $sfsConfidence >= $minSfsConfidence);
 
-        $vars['spamblock_provider'] = $provider ?: '';
-        $vars['spamblock_score'] = ($score !== null) ? (string) $score : '';
+        $shouldBlock = ($postmarkShouldBlock || $sfsShouldBlock);
+
+        $triggered = [];
+        if ($postmarkShouldBlock) {
+            $triggered[] = 'postmark';
+        }
+        if ($sfsShouldBlock) {
+            $triggered[] = 'sfs';
+        }
+
+        $providerTag = $triggered
+            ? implode(',', $triggered)
+            : implode(',', array_keys($byProvider));
+
+        $vars['spamblock_provider'] = $providerTag;
+        $vars['spamblock_score'] = ($postmarkScore !== null) ? (string) $postmarkScore : '';
         $vars['spamblock_should_block'] = $shouldBlock ? '1' : '0';
 
         $this->recentChecks[$context->getMid()] = [
             'provider' => $vars['spamblock_provider'],
-            'score' => $score,
-            'minScoreToBlock' => $minScoreToBlock,
             'shouldBlock' => $shouldBlock,
+            'postmark' => [
+                'score' => $postmarkScore,
+                'minScoreToBlock' => $minScoreToBlock,
+                'shouldBlock' => $postmarkShouldBlock,
+                'statusCode' => $postmark ? $postmark->getStatusCode() : null,
+                'error' => $postmark ? $postmark->getError() : null,
+            ],
+            'sfs' => [
+                'confidence' => $sfsConfidence,
+                'minConfidence' => $minSfsConfidence,
+                'shouldBlock' => $sfsShouldBlock,
+                'statusCode' => $sfs ? $sfs->getStatusCode() : null,
+                'error' => $sfs ? $sfs->getError() : null,
+                'data' => $sfs ? $sfs->getData() : [],
+            ],
         ];
 
         if ($ost) {
-            $msg = sprintf(
-                'mid=%s from=%s subject=%s score=%s min_block_score=%s should_block=%s provider=%s',
+            $postmarkMsg = sprintf(
+                'mid=%s from=%s subject=%s score=%s min_block_score=%s should_block=%s',
                 $context->getMid(),
                 $context->getFromEmail(),
                 $context->getSubject(),
-                ($score !== null) ? $score : 'n/a',
+                ($postmarkScore !== null) ? $postmarkScore : 'n/a',
                 $minScoreToBlock,
-                $shouldBlock ? '1' : '0',
-                $provider ?: 'n/a'
+                $postmarkShouldBlock ? '1' : '0'
             );
 
-            $errorBits = array_filter(array_map(function ($r) {
-                $err = $r->getError();
-                if (!$err) {
-                    return null;
-                }
-
-                $status = $r->getStatusCode();
-                if ($status) {
-                    return sprintf('%s(status=%s): %s', $r->getProvider(), $status, $err);
-                }
-
-                return sprintf('%s: %s', $r->getProvider(), $err);
-            }, $results));
-
-            if ($errorBits) {
-                $msg .= '\nerrors=' . implode('; ', $errorBits);
+            if ($postmark && $postmark->getError()) {
+                $status = $postmark->getStatusCode();
+                $postmarkMsg .= sprintf(
+                    "\nerror=%s",
+                    $status ? sprintf('status=%s %s', $status, $postmark->getError()) : $postmark->getError()
+                );
             }
 
-            $ost->logDebug('Spamblock', $msg, true);
+            $ost->logDebug('Spamblock - Postmark', $postmarkMsg, true);
+
+            $sfsData = $sfs ? $sfs->getData() : [];
+            $sfsMsg = sprintf(
+                'mid=%s from=%s ip=%s confidence=%s min_confidence=%s should_block=%s email_confidence=%s ip_confidence=%s email_frequency=%s ip_frequency=%s',
+                $context->getMid(),
+                $context->getFromEmail(),
+                $context->getIp() ?: 'n/a',
+                ($sfsConfidence !== null) ? $sfsConfidence : 'n/a',
+                $minSfsConfidence,
+                $sfsShouldBlock ? '1' : '0',
+                (array_key_exists('email_confidence', $sfsData) && $sfsData['email_confidence'] !== null)
+                    ? $sfsData['email_confidence']
+                    : 'n/a',
+                (array_key_exists('ip_confidence', $sfsData) && $sfsData['ip_confidence'] !== null)
+                    ? $sfsData['ip_confidence']
+                    : 'n/a',
+                (array_key_exists('email_frequency', $sfsData) && $sfsData['email_frequency'] !== null)
+                    ? $sfsData['email_frequency']
+                    : 'n/a',
+                (array_key_exists('ip_frequency', $sfsData) && $sfsData['ip_frequency'] !== null)
+                    ? $sfsData['ip_frequency']
+                    : 'n/a'
+            );
+
+            if ($sfs && $sfs->getError()) {
+                $status = $sfs->getStatusCode();
+                $sfsMsg .= sprintf(
+                    "\nerror=%s",
+                    $status ? sprintf('status=%s %s', $status, $sfs->getError()) : $sfs->getError()
+                );
+            }
+
+            $ost->logDebug('Spamblock - SFS', $sfsMsg, true);
         }
     }
 
@@ -142,15 +193,37 @@ class SpamblockPlugin extends Plugin
         unset($this->recentChecks[$mid]);
 
         if ($ost && method_exists($ticket, 'getNumber')) {
+            $postmark = $check['postmark'] ?? null;
+            $sfs = $check['sfs'] ?? null;
+
             $ost->logDebug(
-                'Spamblock',
+                'Spamblock - Postmark',
                 sprintf(
-                    'ticket=%s mid=%s score=%s should_block=%s provider=%s',
+                    'ticket=%s mid=%s score=%s should_block=%s',
                     $ticket->getNumber(),
                     $mid,
-                    $check['score'] !== null ? $check['score'] : 'n/a',
-                    $check['shouldBlock'] ? '1' : '0',
-                    $check['provider'] ?: 'n/a'
+                    (is_array($postmark) && array_key_exists('score', $postmark) && $postmark['score'] !== null)
+                        ? $postmark['score']
+                        : 'n/a',
+                    (is_array($postmark) && !empty($postmark['shouldBlock']))
+                        ? '1'
+                        : '0'
+                ),
+                true
+            );
+
+            $ost->logDebug(
+                'Spamblock - SFS',
+                sprintf(
+                    'ticket=%s mid=%s confidence=%s should_block=%s',
+                    $ticket->getNumber(),
+                    $mid,
+                    (is_array($sfs) && array_key_exists('confidence', $sfs) && $sfs['confidence'] !== null)
+                        ? $sfs['confidence']
+                        : 'n/a',
+                    (is_array($sfs) && !empty($sfs['shouldBlock']))
+                        ? '1'
+                        : '0'
                 ),
                 true
             );

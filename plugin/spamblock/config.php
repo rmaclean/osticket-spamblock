@@ -20,6 +20,18 @@ class SpamblockConfig extends PluginConfig
                 ],
                 'validator' => 'number',
             ]),
+            'sfs_min_confidence' => new TextboxField([
+                'id' => 2,
+                'label' => __('SFS Minimum Confidence (%)'),
+                'required' => true,
+                'default' => '90.0',
+                'hint' => __('StopForumSpam confidence percentage (0-100). Higher is more likely spam.'),
+                'configuration' => [
+                    'size' => 6,
+                    'length' => 10,
+                ],
+                'validator' => 'number',
+            ]),
         ];
     }
 
@@ -28,6 +40,16 @@ class SpamblockConfig extends PluginConfig
         $val = $this->get('min_block_score');
         if ($val === null || $val === '') {
             return 5.0;
+        }
+
+        return (float) $val;
+    }
+
+    public function getSfsMinConfidence()
+    {
+        $val = $this->get('sfs_min_confidence');
+        if ($val === null || $val === '') {
+            return 90.0;
         }
 
         return (float) $val;
