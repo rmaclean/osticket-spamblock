@@ -32,6 +32,12 @@ class SpamblockConfig extends PluginConfig
                 ],
                 'validator' => 'number',
             ]),
+            'test_mode' => new BooleanField([
+                'id' => 3,
+                'label' => __('Test Mode'),
+                'hint' => __('When enabled, Spamblock will not block tickets; it will only log what would have been blocked.'),
+                'default' => false,
+            ]),
         ];
     }
 
@@ -53,5 +59,10 @@ class SpamblockConfig extends PluginConfig
         }
 
         return (float) $val;
+    }
+
+    public function getTestMode()
+    {
+        return (bool) $this->get('test_mode');
     }
 }

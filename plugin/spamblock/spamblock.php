@@ -61,6 +61,10 @@ class SpamblockPlugin extends Plugin
             ? $config->getSfsMinConfidence()
             : 90.0;
 
+        $testMode = ($config instanceof SpamblockConfig)
+            ? $config->getTestMode()
+            : false;
+
         $context = SpamblockEmailContext::fromTicketVars($vars);
         $results = $this->getSpamChecker()->check($context);
 
@@ -77,7 +81,8 @@ class SpamblockPlugin extends Plugin
         $sfsConfidence = $sfs ? $sfs->getScore() : null;
         $sfsShouldBlock = ($sfsConfidence !== null && $sfsConfidence >= $minSfsConfidence);
 
-        $shouldBlock = ($postmarkShouldBlock || $sfsShouldBlock);
+        $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock);
+        $shouldBlock = $testMode ? false : $wouldBlock;
 
         $triggered = [];
         if ($postmarkShouldBlock) {
@@ -85,6 +90,40 @@ class SpamblockPlugin extends Plugin
         }
         if ($sfsShouldBlock) {
             $triggered[] = 'sfs';
+        }
+
+        if ($ost && $triggered) {
+            foreach ($triggered as $t) {
+                if ($t === 'postmark') {
+                    $msg = sprintf(
+                        'email=%s system=%s score=%s',
+                        $context->getFromEmail(),
+                        'Spamcheck',
+                        ($postmarkScore !== null) ? $postmarkScore : 'n/a'
+                    );
+
+                    if ($testMode) {
+                        $msg .= ' test_mode=1';
+                    }
+
+                    $ost->logWarning('Spamblock - Blocked Email', $msg, true);
+                }
+
+                if ($t === 'sfs') {
+                    $msg = sprintf(
+                        'email=%s system=%s score=%s',
+                        $context->getFromEmail(),
+                        'SFS',
+                        ($sfsConfidence !== null) ? $sfsConfidence : 'n/a'
+                    );
+
+                    if ($testMode) {
+                        $msg .= ' test_mode=1';
+                    }
+
+                    $ost->logWarning('Spamblock - Blocked Email', $msg, true);
+                }
+            }
         }
 
         $providerTag = $triggered
@@ -97,6 +136,8 @@ class SpamblockPlugin extends Plugin
 
         $this->recentChecks[$context->getMid()] = [
             'provider' => $vars['spamblock_provider'],
+            'testMode' => $testMode,
+            'wouldBlock' => $wouldBlock,
             'shouldBlock' => $shouldBlock,
             'postmark' => [
                 'score' => $postmarkScore,
