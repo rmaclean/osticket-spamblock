@@ -27,6 +27,13 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
 
+      - name: Ensure tag exists on this commit
+        run: |
+          git rev-parse "${RELEASE_TAG}^{tag}" >/dev/null 2>&1 || {
+            echo "Expected an existing tag ref: ${RELEASE_TAG}" >&2
+            exit 1
+          }
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:

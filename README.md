@@ -93,6 +93,15 @@ This repo includes a small build script that packages `plugin/spamblock/` into `
 
 - `php -d phar.readonly=0 scripts/build-phar.php --out dist/spamblock.phar`
 
+## Releasing
+Releases are published automatically by GitHub Actions when a version tag like `v0.2.1` is pushed.
+
+This repo includes a helper script to bump the version and create the tag:
+- `./scripts/release.sh 0.2.1`
+
+Then push the commit + tag:
+- `git push origin main --follow-tags`
+
 ## Notes
 - Local osTicket config is stored in `.osticket/` and is intentionally ignored by git.
 - This is a development setup; hardening (locking down `setup/`, file permissions, production mail, etc.) comes later.
