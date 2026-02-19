@@ -36,7 +36,7 @@ In osTicket: Admin Panel → Manage → Plugins → Spamblock
 When **Test Mode** is enabled, Spamblock will **not block** any inbound emails.
 
 Instead, it will emit a **warning** log entry for anything that *would have been blocked*:
-- Log title: `Spamblock - Blocked Email`
+- Log title: `Spamblock - Would have blocked Email`
 - Contains: `email`, `system` (`Spamcheck` or `SFS`), and the `score`
 
 This lets you tune thresholds safely by observing what would be blocked before turning blocking on.

@@ -143,6 +143,10 @@ class SpamblockPlugin extends Plugin
         }
 
         if ($ost && $triggered) {
+            $warnTitle = $testMode
+                ? 'Spamblock - Would have blocked Email'
+                : 'Spamblock - Blocked Email';
+
             foreach ($triggered as $t) {
                 if ($t === 'postmark') {
                     $msg = sprintf(
@@ -156,7 +160,7 @@ class SpamblockPlugin extends Plugin
                         $msg .= ' test_mode=1';
                     }
 
-                    $ost->logWarning('Spamblock - Blocked Email', $msg, true);
+                    $ost->logWarning($warnTitle, $msg, true);
                 }
 
                 if ($t === 'sfs') {
@@ -171,7 +175,7 @@ class SpamblockPlugin extends Plugin
                         $msg .= ' test_mode=1';
                     }
 
-                    $ost->logWarning('Spamblock - Blocked Email', $msg, true);
+                    $ost->logWarning($warnTitle, $msg, true);
                 }
             }
         }
@@ -352,23 +356,28 @@ class SpamblockPlugin extends Plugin
         echo __('Spamblock');
         echo '</a></li>';
 
-        $label = sprintf('%s %s', __('Is Spam?'), $isSpam ? __('Yes') : __('No'));
         $href = 'ajax.php/spamblock/ticket/' . $ticket->getId() . '/details';
+
+        $label = $isSpam ? __('Yes') : __('No');
+        $rowHtml = sprintf(
+            '<tr id="spamblock-is-spam-row"><th>%s:</th><td><a id="spamblock-is-spam" href="#%s">%s</a></td></tr>',
+            __('Is Spam?'),
+            $href,
+            Format::htmlchars($label)
+        );
 
         $script = sprintf(
             '<script>$(function(){'
-            . 'if ($("#spamblock-is-spam").length) return;'
-            . 'var $h2 = $(".flush-left h2");'
-            . 'if (!$h2.length) return;'
-            . 'var href = "#" + %s;'
-            . 'var label = %s;'
-            . 'var $a = $("<a/>", {id: "spamblock-is-spam", href: href, text: label});'
-            . '$a.on("click", function(e){ e.preventDefault(); $.dialog($(this).attr("href").substr(1), 201); return false; });'
-            . '$a.css({marginLeft: "12px", fontSize: "13px"});'
-            . '$h2.append($a);'
+            . 'if ($("#spamblock-is-spam-row").length) return;'
+            . 'var $tbl = $(".ticket_info td:first table");'
+            . 'if (!$tbl.length) return;'
+            . 'var $rows = $tbl.find("tr");'
+            . 'if (!$rows.length) return;'
+            . 'var row = %s;'
+            . '$(row).insertBefore($rows.last());'
+            . '$("#spamblock-is-spam").on("click", function(e){ e.preventDefault(); $.dialog($(this).attr("href").substr(1), 201); return false; });'
             . '});</script>',
-            JsonDataEncoder::encode($href),
-            JsonDataEncoder::encode($label)
+            JsonDataEncoder::encode($rowHtml)
         );
 
         echo $script;

@@ -1,17 +1,19 @@
 <?php
 
-global $thisstaff, $ticket, $spamblockMeta;
+global $thisstaff;
 
 $canMarkSpam = false;
-if ($ticket && $thisstaff) {
+if (isset($ticket) && $ticket && $thisstaff) {
     $canMarkSpam = $thisstaff->hasPerm(Email::PERM_BANLIST)
         && $ticket->checkStaffPerm($thisstaff, Ticket::PERM_DELETE);
 }
 
-$email = $spamblockMeta ? (string) $spamblockMeta['email'] : '';
-$isSpam = $spamblockMeta ? (bool) $spamblockMeta['is_spam'] : false;
-$postmarkScore = $spamblockMeta ? $spamblockMeta['postmark_score'] : null;
-$sfsConfidence = $spamblockMeta ? $spamblockMeta['sfs_confidence'] : null;
+$meta = isset($spamblockMeta) && is_array($spamblockMeta) ? $spamblockMeta : null;
+
+$email = $meta ? (string) $meta['email'] : '';
+$isSpam = $meta ? (bool) $meta['is_spam'] : false;
+$postmarkScore = $meta ? $meta['postmark_score'] : null;
+$sfsConfidence = $meta ? $meta['sfs_confidence'] : null;
 
 ?>
 <div style="padding: 10px 12px;">
