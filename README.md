@@ -1,6 +1,10 @@
 # spamblock (osTicket plugin)
 A plugin for osTicket that spam-checks inbound email tickets and blocks them over a configurable score threshold.
 
+## Works with
+
+version 1.18
+
 ## Installation (GitHub Releases)
 1. Download `spamblock.phar` from this repo’s **Releases** page.
 2. Copy it into your osTicket installation’s `include/plugins/` directory.
