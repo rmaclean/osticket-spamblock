@@ -24,6 +24,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_fail_action', 'ignore');
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
 
         $checker = new FakeChecker([
             new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
@@ -61,6 +62,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_fail_action', 'ignore');
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
 
         $checker = new FakeChecker([
             new SpamblockSpamCheckResult('postmark', 999.0, null, 200),
@@ -97,6 +99,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_fail_action', 'ignore');
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
 
         $checker = new FakeChecker([
             new SpamblockSpamCheckResult('postmark', 999.0, null, 200),
@@ -120,6 +123,53 @@ final class SpamblockPluginTest extends TestCase
         $this->assertSame('0', $vars['spamblock_should_block']);
     }
 
+    public function testBlockedEmailLogLevelDebugUsesDebug(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'debug');
+
+        $checker = new FakeChecker([
+            new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-block-debug@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $logger = $GLOBALS['ost'];
+        $this->assertInstanceOf(OstTestLogger::class, $logger);
+
+        $blockedInWarnings = array_values(array_filter($logger->warnings, function ($row) {
+            return isset($row[0]) && $row[0] === 'Spamblock - Blocked Email';
+        }));
+
+        $blockedInDebug = array_values(array_filter($logger->debug, function ($row) {
+            return isset($row[0]) && $row[0] === 'Spamblock - Blocked Email';
+        }));
+
+        $this->assertCount(0, $blockedInWarnings);
+        $this->assertCount(1, $blockedInDebug);
+    }
+
     public function testOnTicketCreatedWritesSpamMetaAndClearsRecentChecks(): void
     {
         $plugin = new SpamblockPlugin();
@@ -135,6 +185,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_fail_action', 'ignore');
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
 
         $this->setPrivate($plugin, 'spamblockConfig', $cfg);
         $this->setPrivate($plugin, 'spamChecker', $checker);
@@ -200,6 +251,7 @@ final class OstTestLogger
 {
     public $warnings = [];
     public $debug = [];
+    public $errors = [];
 
     public function logWarning($title, $message, $force)
     {
@@ -209,6 +261,11 @@ final class OstTestLogger
     public function logDebug($title, $message, $force)
     {
         $this->debug[] = [$title, $message];
+    }
+
+    public function logError($title, $message, $force)
+    {
+        $this->errors[] = [$title, $message];
     }
 
     public function getCSRF()

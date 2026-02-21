@@ -38,6 +38,8 @@ In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `SPF Record Missing` (Do Nothing / Treat as Spam)
 - `SPF Record Invalid` (Do Nothing / Treat as Spam)
 
+![Spamblock configuration](docs/images/configscreenshot.png)
+
 If all SPF actions are set to **Do Nothing**, SPF checks are skipped entirely.
 
 ### Test Mode
@@ -52,7 +54,12 @@ This lets you tune thresholds safely by observing what would be blocked before t
 ## Ticket UI
 On the staff ticket view, Spamblock adds:
 - A label in the ticket header: `Is Spam?` (Yes/No)
+
+![Is Spam label in the ticket header](docs/images/spamlabelscreenshot.png)
+
 - A popup (via the ticket “More” menu and the label) that shows per-provider results (Spamcheck + SFS + SPF)
+
+![Spamblock popup](docs/images/spampopupscreenshot.png)
 
 In **Test Mode**, you’ll see real `Is Spam?` Yes/No values based on your configured thresholds.
 In normal mode, spam would typically be blocked before ticket creation, so you’ll usually see `No`.

@@ -6,6 +6,7 @@ require_once INCLUDE_DIR . 'class.forms.php';
 class SpamblockConfig extends PluginConfig
 {
     private const CHOICES_IGNORE_SPAM = "ignore:Do Nothing\nspam:Treat as Spam";
+    private const CHOICES_LOG_LEVEL = "debug:Debug\nwarning:Warning\nerror:Error";
 
     public function getOptions()
     {
@@ -70,6 +71,16 @@ class SpamblockConfig extends PluginConfig
                     'choices' => self::CHOICES_IGNORE_SPAM,
                 ],
             ]),
+            'blocked_email_log_level' => new ChoiceField([
+                'id' => 7,
+                'label' => __('Blocked Email Log Level'),
+                'required' => true,
+                'default' => 'warning',
+                'hint' => __('Log level for "Spamblock - Blocked Email" and "Spamblock - Would have blocked Email". Higher levels may trigger osTicket email alerts.'),
+                'configuration' => [
+                    'choices' => self::CHOICES_LOG_LEVEL,
+                ],
+            ]),
         ];
     }
 
@@ -121,5 +132,15 @@ class SpamblockConfig extends PluginConfig
         return $this->getSpfFailAction() === 'spam'
             || $this->getSpfNoneAction() === 'spam'
             || $this->getSpfInvalidAction() === 'spam';
+    }
+
+    public function getBlockedEmailLogLevel()
+    {
+        $val = strtolower(trim((string) $this->get('blocked_email_log_level')));
+        if (!in_array($val, ['debug', 'warning', 'error'], true)) {
+            return 'warning';
+        }
+
+        return $val;
     }
 }

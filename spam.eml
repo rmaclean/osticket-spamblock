@@ -1,0 +1,31 @@
+Received: from suspicious-host (suspicious-host [203.0.113.10]) by localhost with ESMTP;
+ Sat, 21 Feb 2026 12:18:00 +0000
+Authentication-Results: spf=fail (sender IP is 203.0.113.10) smtp.mailfrom=gmail.com; dkim=none; dmarc=none
+Received-SPF: Fail (sender IP is 203.0.113.10)
+X-Sender-IP: 203.0.113.10
+Subject: URGENT: Your Google Account will be closed today (Action Required)
+From: "Google Account Security" <account-security@gmail.com>
+To: phishing@pot
+Message-Id: <20260221121800.spamblock@example>
+Date: Sat, 21 Feb 2026 12:18:00 +0000
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<html>
+  <body>
+    <p><strong>ATTENTION REQUIRED</strong></p>
+    <p>
+      Your account has been flagged for suspicious activity and will be permanently closed in
+      <strong>24 hours</strong>.
+    </p>
+    <p>
+      Verify immediately to avoid termination:
+      <a href="http://example.com/verify">http://example.com/verify</a>
+    </p>
+    <hr />
+    <p>
+      Free gift card, instant cash, crypto payout, urgent wire transfer — click now!
+      Limited time offer. Congratulations winner.
+    </p>
+  </body>
+</html>

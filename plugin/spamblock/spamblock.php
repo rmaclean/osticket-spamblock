@@ -18,6 +18,29 @@ class SpamblockPlugin extends Plugin
     private $recentChecks = [];
     private $spamblockConfig;
 
+    private function logAtLevel($ost, $level, $title, $message)
+    {
+        if (!$ost) {
+            return;
+        }
+
+        $level = strtolower(trim((string) $level));
+
+        if ($level === 'debug' && method_exists($ost, 'logDebug')) {
+            $ost->logDebug($title, $message, true);
+            return;
+        }
+
+        if ($level === 'error' && method_exists($ost, 'logError')) {
+            $ost->logError($title, $message, true);
+            return;
+        }
+
+        if (method_exists($ost, 'logWarning')) {
+            $ost->logWarning($title, $message, true);
+        }
+    }
+
     private function getSpamblockConfig()
     {
         if (isset($this->spamblockConfig) && $this->spamblockConfig instanceof SpamblockConfig) {
@@ -79,9 +102,12 @@ class SpamblockPlugin extends Plugin
         SpamblockTicketSpamMeta::autoCreateTable();
     }
 
-    private function getSpamChecker($config = null)
+    private function getSpamChecker($config = null, $includeSpf = null)
     {
         $wantSpf = ($config instanceof SpamblockConfig) ? $config->isSpfEnabled() : false;
+        if ($includeSpf === false) {
+            $wantSpf = false;
+        }
 
         if (!isset($this->spamChecker) || $this->spamCheckerHasSpf !== $wantSpf) {
             $providers = [
@@ -126,6 +152,10 @@ class SpamblockPlugin extends Plugin
             ? $config->getTestMode()
             : false;
 
+        $blockedEmailLogLevel = ($config instanceof SpamblockConfig)
+            ? $config->getBlockedEmailLogLevel()
+            : 'warning';
+
         $spfFailAction = ($config instanceof SpamblockConfig)
             ? $config->getSpfFailAction()
             : 'ignore';
@@ -139,7 +169,12 @@ class SpamblockPlugin extends Plugin
             : 'ignore';
 
         $context = SpamblockEmailContext::fromTicketVars($vars);
-        $results = $this->getSpamChecker($config)->check($context);
+
+        $includeSpf = ($config instanceof SpamblockConfig)
+            ? ($config->isSpfEnabled() && $context->getIp() !== '')
+            : false;
+
+        $results = $this->getSpamChecker($config, $includeSpf)->check($context);
 
         $byProvider = [];
         foreach ($results as $r) {
@@ -199,7 +234,7 @@ class SpamblockPlugin extends Plugin
                         $msg .= ' test_mode=1';
                     }
 
-                    $ost->logWarning($warnTitle, $msg, true);
+                    $this->logAtLevel($ost, $blockedEmailLogLevel, $warnTitle, $msg);
                 }
 
                 if ($t === 'sfs') {
@@ -214,7 +249,7 @@ class SpamblockPlugin extends Plugin
                         $msg .= ' test_mode=1';
                     }
 
-                    $ost->logWarning($warnTitle, $msg, true);
+                    $this->logAtLevel($ost, $blockedEmailLogLevel, $warnTitle, $msg);
                 }
 
                 if ($t === 'spf') {
@@ -231,7 +266,7 @@ class SpamblockPlugin extends Plugin
                         $msg .= ' test_mode=1';
                     }
 
-                    $ost->logWarning($warnTitle, $msg, true);
+                    $this->logAtLevel($ost, $blockedEmailLogLevel, $warnTitle, $msg);
                 }
             }
         }
@@ -265,13 +300,15 @@ class SpamblockPlugin extends Plugin
                 'error' => $sfs ? $sfs->getError() : null,
                 'data' => $sfs ? $sfs->getData() : [],
             ],
-            'spf' => [
-                'result' => $spfResult,
-                'shouldBlock' => $spfShouldBlock,
-                'statusCode' => $spf ? $spf->getStatusCode() : null,
-                'error' => $spf ? $spf->getError() : null,
-                'data' => $spf ? $spf->getData() : [],
-            ],
+            'spf' => $spf
+                ? [
+                    'result' => $spfResult,
+                    'shouldBlock' => $spfShouldBlock,
+                    'statusCode' => $spf->getStatusCode(),
+                    'error' => $spf->getError(),
+                    'data' => $spf->getData(),
+                ]
+                : null,
         ];
 
         if ($ost) {
