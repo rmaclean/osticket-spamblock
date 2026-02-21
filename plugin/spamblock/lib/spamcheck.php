@@ -344,6 +344,12 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
 
     public function check(SpamblockEmailContext $context)
     {
+        $debugData = [
+            'url_called' => self::ENDPOINT,
+            'method' => 'POST',
+            'timeout_seconds' => 8,
+        ];
+
         $payload = json_encode([
             'email' => $context->getRawEmail(),
             'options' => 'short',
@@ -353,7 +359,9 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
             return new SpamblockSpamCheckResult(
                 $this->getName(),
                 null,
-                'Unable to encode request payload'
+                'Unable to encode request payload',
+                null,
+                $debugData
             );
         }
 
@@ -374,7 +382,8 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Network error calling Postmark Spamcheck',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -385,7 +394,8 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Non-2xx response from Postmark Spamcheck',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -395,7 +405,8 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Unable to decode Postmark Spamcheck response JSON',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -404,15 +415,19 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Postmark Spamcheck response missing numeric score',
-                $status
+                $status,
+                $debugData
             );
         }
+
+        $debugData['response_score'] = (float) $decoded['score'];
 
         return new SpamblockSpamCheckResult(
             $this->getName(),
             (float) $decoded['score'],
             null,
-            $status
+            $status,
+            $debugData
         );
     }
 }
@@ -463,7 +478,9 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
 
         $url = self::ENDPOINT . '?' . http_build_query($params);
         $debugData = [
-            'url' => $url,
+            'url_called' => $url,
+            'method' => 'GET',
+            'timeout_seconds' => 8,
         ];
 
         $res = $this->http->request(
@@ -534,7 +551,9 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
         $maxConfidence = $confidences ? max($confidences) : null;
 
         $data = [
-            'url' => $url,
+            'url_called' => $url,
+            'method' => 'GET',
+            'timeout_seconds' => 8,
             'email_confidence' => $emailConfidence,
             'ip_confidence' => $ipConfidence,
             'email_appears' => $this->extractInt($emailData, 'appears'),

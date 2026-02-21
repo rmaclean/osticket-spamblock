@@ -48,7 +48,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
             );
         }
 
-        $res = $this->evaluateDomain($domain, $ip, 0);
+        $trace = [];
+        $res = $this->evaluateDomain($domain, $ip, 0, $trace);
 
         return new SpamblockSpamCheckResult(
             $this->getName(),
@@ -63,13 +64,16 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 'ip' => $ip,
                 'record' => $res['record'],
                 'raw' => $res['raw'],
+                'trace' => $trace,
             ]
         );
     }
 
-    private function evaluateDomain($domain, $ip, $depth)
+    private function evaluateDomain($domain, $ip, $depth, array &$trace)
     {
         if ($depth >= self::MAX_DEPTH) {
+            $trace[] = sprintf('domain=%s depth=%s error=%s', $domain, $depth, 'SPF recursion limit exceeded');
+
             return [
                 'domain' => $domain,
                 'result' => 'invalid',
@@ -82,6 +86,15 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
 
         $recordInfo = $this->getSpfRecord($domain);
         if ($recordInfo['error']) {
+            $trace[] = sprintf(
+                'domain=%s spf_record=%s raw=%s result=%s error=%s',
+                $domain,
+                $recordInfo['record'] !== null ? (string) $recordInfo['record'] : '(none)',
+                'temperror',
+                'invalid',
+                $recordInfo['error']
+            );
+
             return [
                 'domain' => $domain,
                 'result' => 'invalid',
@@ -94,6 +107,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
 
         $record = $recordInfo['record'];
         if ($record === null) {
+            $trace[] = sprintf('domain=%s spf_record=%s raw=%s result=%s', $domain, '(none)', 'none', 'none');
+
             return [
                 'domain' => $domain,
                 'result' => 'none',
@@ -104,7 +119,19 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
             ];
         }
 
-        $eval = $this->evaluateRecord($domain, $ip, $record, $depth);
+        $trace[] = sprintf('domain=%s spf_record=%s', $domain, $record);
+
+        $eval = $this->evaluateRecord($domain, $ip, $record, $depth, $trace);
+
+        $trace[] = sprintf(
+            'domain=%s raw=%s result=%s%s',
+            array_key_exists('domain', $eval) ? (string) $eval['domain'] : $domain,
+            (string) $eval['raw'],
+            (string) $eval['result'],
+            array_key_exists('redirect_chain', $eval) && is_array($eval['redirect_chain']) && $eval['redirect_chain']
+                ? (' redirect_chain=' . implode('->', $eval['redirect_chain']))
+                : ''
+        );
 
         return [
             'domain' => array_key_exists('domain', $eval) ? $eval['domain'] : $domain,
@@ -165,7 +192,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         ];
     }
 
-    private function evaluateRecord($domain, $ip, $record, $depth)
+    private function evaluateRecord($domain, $ip, $record, $depth, array &$trace)
     {
         $record = trim((string) $record);
         if (stripos($record, 'v=spf1') !== 0) {
@@ -187,6 +214,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
 
         $redirect = null;
         $matched = null;
+        $matchedBy = null;
 
         foreach ($tokens as $t) {
             $t = trim((string) $t);
@@ -208,6 +236,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
 
             if ($t === 'all') {
                 $matched = $qual;
+                $matchedBy = 'all';
                 break;
             }
 
@@ -215,6 +244,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 $cidr = substr($t, strlen('ip4:'));
                 if ($this->cidrMatch($ip, $cidr)) {
                     $matched = $qual;
+                    $matchedBy = 'ip4:' . $cidr;
                     break;
                 }
                 continue;
@@ -224,6 +254,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 $cidr = substr($t, strlen('ip6:'));
                 if ($this->cidrMatch($ip, $cidr)) {
                     $matched = $qual;
+                    $matchedBy = 'ip6:' . $cidr;
                     break;
                 }
                 continue;
@@ -240,9 +271,11 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                     ];
                 }
 
-                $included = $this->evaluateDomain($includeDomain, $ip, $depth + 1);
+                $trace[] = sprintf('domain=%s include=%s', $domain, $includeDomain);
+                $included = $this->evaluateDomain($includeDomain, $ip, $depth + 1, $trace);
                 if ($included['raw'] === 'pass') {
                     $matched = $qual;
+                    $matchedBy = 'include:' . $includeDomain;
                     break;
                 }
 
@@ -254,6 +287,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 $aDomain = strtolower(trim($aDomain));
                 if ($this->domainHasIp($aDomain, $ip)) {
                     $matched = $qual;
+                    $matchedBy = ($t === 'a') ? 'a' : ('a:' . $aDomain);
                     break;
                 }
                 continue;
@@ -264,10 +298,13 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 $mxDomain = strtolower(trim($mxDomain));
                 if ($this->mxHasIp($mxDomain, $ip)) {
                     $matched = $qual;
+                    $matchedBy = ($t === 'mx') ? 'mx' : ('mx:' . $mxDomain);
                     break;
                 }
                 continue;
             }
+
+            $trace[] = sprintf('domain=%s unsupported_mechanism=%s', $domain, $t);
 
             return [
                 'result' => 'invalid',
@@ -286,7 +323,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 ];
             }
 
-            $redir = $this->evaluateDomain($redirect, $ip, $depth + 1);
+            $trace[] = sprintf('domain=%s redirect=%s', $domain, $redirect);
+            $redir = $this->evaluateDomain($redirect, $ip, $depth + 1, $trace);
 
             $chain = [$redirect];
             if (isset($redir['redirect_chain']) && is_array($redir['redirect_chain']) && $redir['redirect_chain']) {
@@ -312,6 +350,10 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
             $raw = 'softfail';
         } elseif ($matched === '?') {
             $raw = 'neutral';
+        }
+
+        if ($matchedBy !== null) {
+            $trace[] = sprintf('domain=%s matched=%s qualifier=%s raw=%s', $domain, $matchedBy, $matched, $raw);
         }
 
         $simplified = $raw;

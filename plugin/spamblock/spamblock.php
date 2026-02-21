@@ -255,6 +255,7 @@ class SpamblockPlugin extends Plugin
                 'shouldBlock' => $postmarkShouldBlock,
                 'statusCode' => $postmark ? $postmark->getStatusCode() : null,
                 'error' => $postmark ? $postmark->getError() : null,
+                'data' => $postmark ? $postmark->getData() : [],
             ],
             'sfs' => [
                 'confidence' => $sfsConfidence,
@@ -274,12 +275,17 @@ class SpamblockPlugin extends Plugin
         ];
 
         if ($ost) {
+            $postmarkData = $postmark ? $postmark->getData() : [];
+            $postmarkUrl = (is_array($postmarkData) && array_key_exists('url_called', $postmarkData) && $postmarkData['url_called'])
+                ? (string) $postmarkData['url_called']
+                : 'https://spamcheck.postmarkapp.com/filter';
+
             $postmarkMsg = sprintf(
-                'mid=%s from=%s subject=%s url=%s score=%s min_block_score=%s should_block=%s',
+                "url_called=%s\nmid=%s from=%s subject=%s\nscore=%s min_block_score=%s should_block=%s",
+                $postmarkUrl,
                 $context->getMid(),
                 $context->getFromEmail(),
                 $context->getSubject(),
-                'https://spamcheck.postmarkapp.com/filter',
                 ($postmarkScore !== null) ? $postmarkScore : 'n/a',
                 $minScoreToBlock,
                 $postmarkShouldBlock ? '1' : '0'
@@ -296,12 +302,16 @@ class SpamblockPlugin extends Plugin
             $ost->logDebug('Spamblock - Postmark', $postmarkMsg, true);
 
             $sfsData = $sfs ? $sfs->getData() : [];
+            $sfsUrl = (array_key_exists('url_called', $sfsData) && $sfsData['url_called'])
+                ? (string) $sfsData['url_called']
+                : 'n/a';
+
             $sfsMsg = sprintf(
-                'mid=%s from=%s ip=%s url=%s confidence=%s min_confidence=%s should_block=%s email_confidence=%s ip_confidence=%s email_frequency=%s ip_frequency=%s',
+                "url_called=%s\nmid=%s from=%s ip=%s\nconfidence=%s min_confidence=%s should_block=%s email_confidence=%s ip_confidence=%s email_frequency=%s ip_frequency=%s",
+                $sfsUrl,
                 $context->getMid(),
                 $context->getFromEmail(),
                 $context->getIp() ?: 'n/a',
-                (array_key_exists('url', $sfsData) && $sfsData['url']) ? (string) $sfsData['url'] : 'n/a',
                 ($sfsConfidence !== null) ? $sfsConfidence : 'n/a',
                 $minSfsConfidence,
                 $sfsShouldBlock ? '1' : '0',
@@ -331,28 +341,31 @@ class SpamblockPlugin extends Plugin
 
             if ($spf) {
                 $spfData = $spf->getData();
-                $record = isset($spfData['record']) ? (string) $spfData['record'] : '';
-                if (strlen($record) > 240) {
-                    $record = substr($record, 0, 240) . '…';
+
+                $traceLines = [];
+                if (isset($spfData['trace']) && is_array($spfData['trace'])) {
+                    foreach ($spfData['trace'] as $tl) {
+                        $tl = trim((string) $tl);
+                        if ($tl !== '') {
+                            $traceLines[] = '- ' . $tl;
+                        }
+                    }
                 }
 
+                $traceText = $traceLines ? ("\n" . implode("\n", $traceLines)) : '';
+
                 $spfMsg = sprintf(
-                    'mid=%s from=%s domain=%s evaluated_domain=%s ip_used=%s spf_result=%s spf_raw=%s should_block=%s redirect_chain=%s fail_action=%s none_action=%s invalid_action=%s record=%s',
+                    "ip_used=%s\nmid=%s from=%s\nspf_result=%s spf_raw=%s should_block=%s\nfail_action=%s none_action=%s invalid_action=%s%s",
+                    $context->getIp() ?: 'n/a',
                     $context->getMid(),
                     $context->getFromEmail(),
-                    isset($spfData['domain']) ? (string) $spfData['domain'] : 'n/a',
-                    isset($spfData['evaluated_domain']) ? (string) $spfData['evaluated_domain'] : 'n/a',
-                    $context->getIp() ?: 'n/a',
                     isset($spfData['result']) ? (string) $spfData['result'] : 'n/a',
                     isset($spfData['raw']) ? (string) $spfData['raw'] : 'n/a',
                     $spfShouldBlock ? '1' : '0',
-                    isset($spfData['redirect_chain']) && is_array($spfData['redirect_chain'])
-                        ? implode('->', $spfData['redirect_chain'])
-                        : 'n/a',
                     $spfFailAction,
                     $spfNoneAction,
                     $spfInvalidAction,
-                    $record !== '' ? $record : 'n/a'
+                    $traceText
                 );
 
                 if ($spf->getError()) {
@@ -419,46 +432,101 @@ class SpamblockPlugin extends Plugin
         }
 
         if ($ost && method_exists($ticket, 'getNumber')) {
-            $ost->logDebug(
-                'Spamblock - Postmark',
-                sprintf(
-                    'ticket=%s mid=%s score=%s should_block=%s',
-                    $ticket->getNumber(),
-                    $mid,
-                    $postmarkScore !== null ? $postmarkScore : 'n/a',
-                    (is_array($postmark) && !empty($postmark['shouldBlock']))
-                        ? '1'
-                        : '0'
-                ),
-                true
+            $ticketNumber = $ticket->getNumber();
+
+            $postmarkData = is_array($postmark) && array_key_exists('data', $postmark) && is_array($postmark['data'])
+                ? $postmark['data']
+                : [];
+            $postmarkUrl = (array_key_exists('url_called', $postmarkData) && $postmarkData['url_called'])
+                ? (string) $postmarkData['url_called']
+                : 'https://spamcheck.postmarkapp.com/filter';
+
+            $postmarkMsg = sprintf(
+                "url_called=%s\nticket=%s mid=%s\nscore=%s min_block_score=%s should_block=%s",
+                $postmarkUrl,
+                $ticketNumber,
+                $mid,
+                $postmarkScore !== null ? $postmarkScore : 'n/a',
+                (is_array($postmark) && array_key_exists('minScoreToBlock', $postmark)) ? $postmark['minScoreToBlock'] : 'n/a',
+                (is_array($postmark) && !empty($postmark['shouldBlock'])) ? '1' : '0'
             );
 
-            $ost->logDebug(
-                'Spamblock - SFS',
-                sprintf(
-                    'ticket=%s mid=%s confidence=%s should_block=%s',
-                    $ticket->getNumber(),
-                    $mid,
-                    $sfsConfidence !== null ? $sfsConfidence : 'n/a',
-                    (is_array($sfs) && !empty($sfs['shouldBlock']))
-                        ? '1'
-                        : '0'
-                ),
-                true
+            if (is_array($postmark) && !empty($postmark['error'])) {
+                $postmarkMsg .= sprintf(
+                    "\nerror=%s",
+                    !empty($postmark['statusCode'])
+                        ? sprintf('status=%s %s', $postmark['statusCode'], $postmark['error'])
+                        : (string) $postmark['error']
+                );
+            }
+
+            $ost->logDebug('Spamblock - Postmark', $postmarkMsg, true);
+
+            $sfsData = is_array($sfs) && array_key_exists('data', $sfs) && is_array($sfs['data'])
+                ? $sfs['data']
+                : [];
+            $sfsUrl = (array_key_exists('url_called', $sfsData) && $sfsData['url_called'])
+                ? (string) $sfsData['url_called']
+                : 'n/a';
+
+            $sfsMsg = sprintf(
+                "url_called=%s\nticket=%s mid=%s\nconfidence=%s min_confidence=%s should_block=%s",
+                $sfsUrl,
+                $ticketNumber,
+                $mid,
+                $sfsConfidence !== null ? $sfsConfidence : 'n/a',
+                (is_array($sfs) && array_key_exists('minConfidence', $sfs)) ? $sfs['minConfidence'] : 'n/a',
+                (is_array($sfs) && !empty($sfs['shouldBlock'])) ? '1' : '0'
             );
+
+            if (is_array($sfs) && !empty($sfs['error'])) {
+                $sfsMsg .= sprintf(
+                    "\nerror=%s",
+                    !empty($sfs['statusCode'])
+                        ? sprintf('status=%s %s', $sfs['statusCode'], $sfs['error'])
+                        : (string) $sfs['error']
+                );
+            }
+
+            $ost->logDebug('Spamblock - SFS', $sfsMsg, true);
 
             if (is_array($spf)) {
-                $ost->logDebug(
-                    'Spamblock - SPF',
-                    sprintf(
-                        'ticket=%s mid=%s result=%s should_block=%s',
-                        $ticket->getNumber(),
-                        $mid,
-                        $spfResult !== null ? $spfResult : 'n/a',
-                        !empty($spf['shouldBlock']) ? '1' : '0'
-                    ),
-                    true
+                $spfData = array_key_exists('data', $spf) && is_array($spf['data']) ? $spf['data'] : [];
+
+                $traceLines = [];
+                if (array_key_exists('trace', $spfData) && is_array($spfData['trace'])) {
+                    foreach ($spfData['trace'] as $tl) {
+                        $tl = trim((string) $tl);
+                        if ($tl !== '') {
+                            $traceLines[] = '- ' . $tl;
+                        }
+                    }
+                }
+
+                $spfMsg = sprintf(
+                    "ticket=%s mid=%s\nip_used=%s\nspf_result=%s spf_raw=%s should_block=%s",
+                    $ticketNumber,
+                    $mid,
+                    (array_key_exists('ip', $spfData) && $spfData['ip']) ? (string) $spfData['ip'] : 'n/a',
+                    (array_key_exists('result', $spfData) && $spfData['result']) ? (string) $spfData['result'] : ($spfResult !== null ? $spfResult : 'n/a'),
+                    (array_key_exists('raw', $spfData) && $spfData['raw']) ? (string) $spfData['raw'] : 'n/a',
+                    !empty($spf['shouldBlock']) ? '1' : '0'
                 );
+
+                if ($traceLines) {
+                    $spfMsg .= "\n" . implode("\n", $traceLines);
+                }
+
+                if (!empty($spf['error'])) {
+                    $spfMsg .= sprintf(
+                        "\nerror=%s",
+                        !empty($spf['statusCode'])
+                            ? sprintf('status=%s %s', $spf['statusCode'], $spf['error'])
+                            : (string) $spf['error']
+                    );
+                }
+
+                $ost->logDebug('Spamblock - SPF', $spfMsg, true);
             }
         }
     }
