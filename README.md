@@ -15,22 +15,30 @@ Notes:
 - Intercepts ticket creation for tickets created from email (via the `ticket.create.before` signal).
 - Calls Postmark’s Spamcheck API (`https://spamcheck.postmarkapp.com/filter`).
 - Calls StopForumSpam (`https://api.stopforumspam.org/api`) with the sender email address and best-effort originating IP.
+- Optionally performs an SPF check using the sender domain + best-effort originating IP.
 - Logs every checked email with:
   - message-id (`mid`)
   - sender (`from`)
   - subject
   - Postmark spam score
   - StopForumSpam confidence
+  - SPF result (`pass`, `fail`, `none`, `invalid`)
   - whether it would be blocked
 - Blocks tickets when either:
   - `postmark_score >= min_block_score`, or
-  - `sfs_confidence >= sfs_min_confidence`
+  - `sfs_confidence >= sfs_min_confidence`, or
+  - SPF result matches your configured SPF actions
 
 ## Configuration
 In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `Minimum spam score to block`
 - `SFS Minimum Confidence (%)`
 - `Test Mode`
+- `SPF Check Fails` (Do Nothing / Treat as Spam)
+- `SPF Record Missing` (Do Nothing / Treat as Spam)
+- `SPF Record Invalid` (Do Nothing / Treat as Spam)
+
+If all SPF actions are set to **Do Nothing**, SPF checks are skipped entirely.
 
 ### Test Mode
 When **Test Mode** is enabled, Spamblock will **not block** any inbound emails.
@@ -44,7 +52,7 @@ This lets you tune thresholds safely by observing what would be blocked before t
 ## Ticket UI
 On the staff ticket view, Spamblock adds:
 - A label in the ticket header: `Is Spam?` (Yes/No)
-- A popup (via the ticket “More” menu and the label) that shows per-provider scores (Spamcheck + SFS)
+- A popup (via the ticket “More” menu and the label) that shows per-provider results (Spamcheck + SFS + SPF)
 
 In **Test Mode**, you’ll see real `Is Spam?` Yes/No values based on your configured thresholds.
 In normal mode, spam would typically be blocked before ticket creation, so you’ll usually see `No`.
@@ -63,8 +71,9 @@ On startup, Spamblock creates (or updates) an osTicket Ticket Filter named `Spam
 
 ## Provider architecture (implementation detail)
 Spamblock is structured to support multiple spam-check providers internally.
-- Provider interface + Postmark implementation live in `plugin/spamblock/lib/spamcheck.php`.
-- Providers are composed into a collection (currently just Postmark). In the future, additional providers can be added to the provider list without changing any UI.
+- Provider interface + Postmark + SFS live in `plugin/spamblock/lib/spamcheck.php`.
+- SPF provider lives in `plugin/spamblock/lib/spfcheck.php`.
+- Providers are composed into a collection. In the future, additional providers can be added to the provider list without changing any UI.
 
 ## What’s in this repo
 - `plugin/spamblock/`: plugin source code

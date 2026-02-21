@@ -5,6 +5,8 @@ require_once INCLUDE_DIR . 'class.forms.php';
 
 class SpamblockConfig extends PluginConfig
 {
+    private const CHOICES_IGNORE_SPAM = "ignore:Do Nothing\nspam:Treat as Spam";
+
     public function getOptions()
     {
         return [
@@ -38,6 +40,36 @@ class SpamblockConfig extends PluginConfig
                 'hint' => __('When enabled, Spamblock will not block tickets; it will only log what would have been blocked.'),
                 'default' => false,
             ]),
+            'spf_fail_action' => new ChoiceField([
+                'id' => 4,
+                'label' => __('SPF Check Fails'),
+                'required' => true,
+                'default' => 'ignore',
+                'hint' => __('SPF record exists but the sending IP is not allowed.'),
+                'configuration' => [
+                    'choices' => self::CHOICES_IGNORE_SPAM,
+                ],
+            ]),
+            'spf_none_action' => new ChoiceField([
+                'id' => 5,
+                'label' => __('SPF Record Missing'),
+                'required' => true,
+                'default' => 'ignore',
+                'hint' => __('No SPF record found for the sender domain.'),
+                'configuration' => [
+                    'choices' => self::CHOICES_IGNORE_SPAM,
+                ],
+            ]),
+            'spf_invalid_action' => new ChoiceField([
+                'id' => 6,
+                'label' => __('SPF Record Invalid'),
+                'required' => true,
+                'default' => 'ignore',
+                'hint' => __('SPF record is invalid or could not be evaluated.'),
+                'configuration' => [
+                    'choices' => self::CHOICES_IGNORE_SPAM,
+                ],
+            ]),
         ];
     }
 
@@ -64,5 +96,30 @@ class SpamblockConfig extends PluginConfig
     public function getTestMode()
     {
         return (bool) $this->get('test_mode');
+    }
+
+    public function getSpfFailAction()
+    {
+        $val = (string) $this->get('spf_fail_action');
+        return $val ?: 'ignore';
+    }
+
+    public function getSpfNoneAction()
+    {
+        $val = (string) $this->get('spf_none_action');
+        return $val ?: 'ignore';
+    }
+
+    public function getSpfInvalidAction()
+    {
+        $val = (string) $this->get('spf_invalid_action');
+        return $val ?: 'ignore';
+    }
+
+    public function isSpfEnabled()
+    {
+        return $this->getSpfFailAction() === 'spam'
+            || $this->getSpfNoneAction() === 'spam'
+            || $this->getSpfInvalidAction() === 'spam';
     }
 }

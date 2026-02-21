@@ -37,25 +37,114 @@ class SpamblockEmailContext
                 continue;
             }
 
-            $ip = trim((string) $vars[$k]);
+            $ip = self::normalizeIpCandidate($vars[$k]);
             if ($ip !== '') {
                 break;
             }
         }
 
         if ($ip === '' && $header !== '') {
-            if (preg_match('/^X-Originating-IP:\s*\[([^\]]+)\]/mi', $header, $m)) {
-                $ip = trim($m[1]);
-            } elseif (preg_match('/\[([0-9]{1,3}(?:\.[0-9]{1,3}){3})\]/', $header, $m)) {
-                $ip = trim($m[1]);
-            }
-        }
-
-        if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) === false) {
-            $ip = '';
+            $ip = self::extractIpFromHeader($header);
         }
 
         return new self($mid, $fromEmail, $subject, $header, $message, $ip);
+    }
+
+    private static function normalizeIpCandidate($candidate)
+    {
+        $ip = trim((string) $candidate);
+        if ($ip === '') {
+            return '';
+        }
+
+        $ip = trim($ip, " \t\n\r\0\x0B[]()<>,;");
+        if (stripos($ip, 'IPv6:') === 0) {
+            $ip = substr($ip, 5);
+        }
+
+        if (preg_match('/^([0-9]{1,3}(?:\.[0-9]{1,3}){3}):(\d+)$/', $ip, $m)) {
+            $ip = $m[1];
+        }
+
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return '';
+        }
+
+        return $ip;
+    }
+
+    private static function isPublicIp($ip)
+    {
+        return filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) !== false;
+    }
+
+    private static function extractIpFromHeader($header)
+    {
+        $header = (string) $header;
+
+        $candidates = [];
+
+        $simpleHeaderFields = [
+            'X-Originating-IP',
+            'X-Sender-IP',
+            'X-Client-IP',
+            'X-Real-IP',
+        ];
+
+        foreach ($simpleHeaderFields as $field) {
+            $re = '/^' . preg_quote($field, '/') . ':\s*\[?([^\]\s]+)\]?/mi';
+            if (preg_match($re, $header, $m)) {
+                $candidates[] = $m[1];
+            }
+        }
+
+        if (preg_match('/^X-Forwarded-For:\s*([^\r\n]+)/mi', $header, $m)) {
+            $xff = trim((string) $m[1]);
+            $parts = preg_split('/\s*,\s*/', $xff);
+            if ($parts && isset($parts[0])) {
+                $candidates[] = $parts[0];
+            }
+        }
+
+        if (preg_match('/sender IP is\s*\[?([0-9a-fA-F:.]+)\]?/i', $header, $m)) {
+            $candidates[] = $m[1];
+        }
+
+        if (preg_match_all('/\b([0-9]{1,3}(?:\.[0-9]{1,3}){3})\b/', $header, $m)) {
+            foreach ($m[1] as $v) {
+                $candidates[] = $v;
+            }
+        }
+
+        if (preg_match_all('/\b([0-9a-f]{0,4}:[0-9a-f:]{2,})\b/i', $header, $m)) {
+            foreach ($m[1] as $v) {
+                $candidates[] = $v;
+            }
+        }
+
+        $valid = [];
+        foreach ($candidates as $c) {
+            $n = self::normalizeIpCandidate($c);
+            if ($n === '') {
+                continue;
+            }
+
+            if (!in_array($n, $valid, true)) {
+                $valid[] = $n;
+            }
+        }
+
+        foreach ($valid as $v) {
+            if (self::isPublicIp($v)) {
+                return $v;
+            }
+        }
+
+        return $valid ? $valid[0] : '';
     }
 
     public function getMid()
@@ -281,6 +370,9 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
         }
 
         $url = self::ENDPOINT . '?' . http_build_query($params);
+        $debugData = [
+            'url' => $url,
+        ];
 
         $httpOptions = [
             'method' => 'GET',
@@ -305,7 +397,8 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Network error calling StopForumSpam',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -314,7 +407,8 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Non-2xx response from StopForumSpam',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -324,7 +418,8 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 'Unable to decode StopForumSpam response JSON',
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -335,7 +430,8 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
                 $this->getName(),
                 null,
                 $err,
-                $status
+                $status,
+                $debugData
             );
         }
 
@@ -352,6 +448,7 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
         $maxConfidence = $confidences ? max($confidences) : null;
 
         $data = [
+            'url' => $url,
             'email_confidence' => $emailConfidence,
             'ip_confidence' => $ipConfidence,
             'email_appears' => $this->extractInt($emailData, 'appears'),

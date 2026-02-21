@@ -6,8 +6,11 @@ class SpamblockTicketSpamMeta
 
     public static function autoCreateTable()
     {
-        $sql = 'SHOW TABLES LIKE \'' . TABLE_PREFIX . self::TABLE . '\'';
+        $table = TABLE_PREFIX . self::TABLE;
+
+        $sql = 'SHOW TABLES LIKE \'' . $table . '\'';
         if (db_num_rows(db_query($sql))) {
+            self::ensureColumns($table);
             return true;
         }
 
@@ -18,18 +21,42 @@ class SpamblockTicketSpamMeta
                 `is_spam` tinyint(1) unsigned NOT NULL DEFAULT 0,
                 `postmark_score` double DEFAULT NULL,
                 `sfs_confidence` double DEFAULT NULL,
+                `spf_result` varchar(16) DEFAULT NULL,
                 `created` datetime NOT NULL,
                 `updated` datetime NOT NULL,
                 PRIMARY KEY (`ticket_id`),
                 KEY `is_spam` (`is_spam`)
             ) CHARSET=utf8',
-            TABLE_PREFIX . self::TABLE
+            $table
         );
 
-        return db_query($sql);
+        $ok = db_query($sql);
+        if ($ok) {
+            self::ensureColumns($table);
+        }
+
+        return $ok;
     }
 
-    public static function upsert($ticketId, $email, $isSpam, $postmarkScore, $sfsConfidence)
+    private static function ensureColumns($table)
+    {
+        $res = db_query(sprintf(
+            'SHOW COLUMNS FROM `%s` LIKE %s',
+            $table,
+            db_input('spf_result')
+        ));
+
+        if ($res && db_num_rows($res)) {
+            return true;
+        }
+
+        return db_query(sprintf(
+            'ALTER TABLE `%s` ADD COLUMN `spf_result` varchar(16) DEFAULT NULL AFTER `sfs_confidence`',
+            $table
+        ));
+    }
+
+    public static function upsert($ticketId, $email, $isSpam, $postmarkScore, $sfsConfidence, $spfResult = null)
     {
         if (!$ticketId) {
             return false;
@@ -38,14 +65,15 @@ class SpamblockTicketSpamMeta
         self::autoCreateTable();
 
         $sql = sprintf(
-            'REPLACE INTO `%s` (`ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `created`, `updated`)
-            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())',
+            'REPLACE INTO `%s` (`ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`, `created`, `updated`)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())',
             TABLE_PREFIX . self::TABLE,
             db_input($ticketId),
             db_input((string) $email),
             db_input($isSpam ? 1 : 0),
             $postmarkScore === null ? 'NULL' : db_input((float) $postmarkScore),
-            $sfsConfidence === null ? 'NULL' : db_input((float) $sfsConfidence)
+            $sfsConfidence === null ? 'NULL' : db_input((float) $sfsConfidence),
+            $spfResult === null || $spfResult === '' ? 'NULL' : db_input((string) $spfResult)
         );
 
         return db_query($sql);
@@ -60,7 +88,7 @@ class SpamblockTicketSpamMeta
         self::autoCreateTable();
 
         $sql = sprintf(
-            'SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`
+            'SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`
             FROM `%s`
             WHERE `ticket_id`=%s',
             TABLE_PREFIX . self::TABLE,
@@ -80,6 +108,7 @@ class SpamblockTicketSpamMeta
             'is_spam' => ((int) $row['is_spam']) === 1,
             'postmark_score' => $row['postmark_score'] !== null ? (float) $row['postmark_score'] : null,
             'sfs_confidence' => $row['sfs_confidence'] !== null ? (float) $row['sfs_confidence'] : null,
+            'spf_result' => $row['spf_result'] !== null ? (string) $row['spf_result'] : null,
         ];
     }
 }

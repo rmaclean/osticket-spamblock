@@ -5,6 +5,7 @@ require_once INCLUDE_DIR . 'class.signal.php';
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/spamcheck.php';
+require_once __DIR__ . '/lib/spfcheck.php';
 require_once __DIR__ . '/lib/ticket_filter.php';
 require_once __DIR__ . '/lib/ticket_spam_meta.php';
 
@@ -13,6 +14,7 @@ class SpamblockPlugin extends Plugin
     var $config_class = 'SpamblockConfig';
 
     private $spamChecker;
+    private $spamCheckerHasSpf;
     private $recentChecks = [];
     private $spamblockConfig;
 
@@ -77,13 +79,22 @@ class SpamblockPlugin extends Plugin
         SpamblockTicketSpamMeta::autoCreateTable();
     }
 
-    private function getSpamChecker()
+    private function getSpamChecker($config = null)
     {
-        if (!isset($this->spamChecker)) {
-            $this->spamChecker = new SpamblockSpamChecker([
+        $wantSpf = ($config instanceof SpamblockConfig) ? $config->isSpfEnabled() : false;
+
+        if (!isset($this->spamChecker) || $this->spamCheckerHasSpf !== $wantSpf) {
+            $providers = [
                 new SpamblockPostmarkSpamCheckProvider(),
                 new SpamblockStopForumSpamProvider(),
-            ]);
+            ];
+
+            if ($wantSpf) {
+                $providers[] = new SpamblockSpfCheckProvider();
+            }
+
+            $this->spamChecker = new SpamblockSpamChecker($providers);
+            $this->spamCheckerHasSpf = $wantSpf;
         }
 
         return $this->spamChecker;
@@ -115,8 +126,20 @@ class SpamblockPlugin extends Plugin
             ? $config->getTestMode()
             : false;
 
+        $spfFailAction = ($config instanceof SpamblockConfig)
+            ? $config->getSpfFailAction()
+            : 'ignore';
+
+        $spfNoneAction = ($config instanceof SpamblockConfig)
+            ? $config->getSpfNoneAction()
+            : 'ignore';
+
+        $spfInvalidAction = ($config instanceof SpamblockConfig)
+            ? $config->getSpfInvalidAction()
+            : 'ignore';
+
         $context = SpamblockEmailContext::fromTicketVars($vars);
-        $results = $this->getSpamChecker()->check($context);
+        $results = $this->getSpamChecker($config)->check($context);
 
         $byProvider = [];
         foreach ($results as $r) {
@@ -131,7 +154,20 @@ class SpamblockPlugin extends Plugin
         $sfsConfidence = $sfs ? $sfs->getScore() : null;
         $sfsShouldBlock = ($sfsConfidence !== null && $sfsConfidence >= $minSfsConfidence);
 
-        $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock);
+        $spf = $byProvider['spf'] ?? null;
+        $spfData = $spf ? $spf->getData() : [];
+        $spfResult = isset($spfData['result']) ? (string) $spfData['result'] : null;
+        $spfShouldBlock = false;
+
+        if ($spfResult === 'fail') {
+            $spfShouldBlock = $spfFailAction === 'spam';
+        } elseif ($spfResult === 'none') {
+            $spfShouldBlock = $spfNoneAction === 'spam';
+        } elseif ($spfResult === 'invalid') {
+            $spfShouldBlock = $spfInvalidAction === 'spam';
+        }
+
+        $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock);
         $shouldBlock = $testMode ? false : $wouldBlock;
 
         $triggered = [];
@@ -140,6 +176,9 @@ class SpamblockPlugin extends Plugin
         }
         if ($sfsShouldBlock) {
             $triggered[] = 'sfs';
+        }
+        if ($spfShouldBlock) {
+            $triggered[] = 'spf';
         }
 
         if ($ost && $triggered) {
@@ -169,6 +208,23 @@ class SpamblockPlugin extends Plugin
                         $context->getFromEmail(),
                         'SFS',
                         ($sfsConfidence !== null) ? $sfsConfidence : 'n/a'
+                    );
+
+                    if ($testMode) {
+                        $msg .= ' test_mode=1';
+                    }
+
+                    $ost->logWarning($warnTitle, $msg, true);
+                }
+
+                if ($t === 'spf') {
+                    $msg = sprintf(
+                        'email=%s system=%s score=%s domain=%s ip=%s',
+                        $context->getFromEmail(),
+                        'SPF',
+                        $spfResult !== null ? $spfResult : 'n/a',
+                        isset($spfData['domain']) ? (string) $spfData['domain'] : 'n/a',
+                        $context->getIp() ?: 'n/a'
                     );
 
                     if ($testMode) {
@@ -208,14 +264,22 @@ class SpamblockPlugin extends Plugin
                 'error' => $sfs ? $sfs->getError() : null,
                 'data' => $sfs ? $sfs->getData() : [],
             ],
+            'spf' => [
+                'result' => $spfResult,
+                'shouldBlock' => $spfShouldBlock,
+                'statusCode' => $spf ? $spf->getStatusCode() : null,
+                'error' => $spf ? $spf->getError() : null,
+                'data' => $spf ? $spf->getData() : [],
+            ],
         ];
 
         if ($ost) {
             $postmarkMsg = sprintf(
-                'mid=%s from=%s subject=%s score=%s min_block_score=%s should_block=%s',
+                'mid=%s from=%s subject=%s url=%s score=%s min_block_score=%s should_block=%s',
                 $context->getMid(),
                 $context->getFromEmail(),
                 $context->getSubject(),
+                'https://spamcheck.postmarkapp.com/filter',
                 ($postmarkScore !== null) ? $postmarkScore : 'n/a',
                 $minScoreToBlock,
                 $postmarkShouldBlock ? '1' : '0'
@@ -233,10 +297,11 @@ class SpamblockPlugin extends Plugin
 
             $sfsData = $sfs ? $sfs->getData() : [];
             $sfsMsg = sprintf(
-                'mid=%s from=%s ip=%s confidence=%s min_confidence=%s should_block=%s email_confidence=%s ip_confidence=%s email_frequency=%s ip_frequency=%s',
+                'mid=%s from=%s ip=%s url=%s confidence=%s min_confidence=%s should_block=%s email_confidence=%s ip_confidence=%s email_frequency=%s ip_frequency=%s',
                 $context->getMid(),
                 $context->getFromEmail(),
                 $context->getIp() ?: 'n/a',
+                (array_key_exists('url', $sfsData) && $sfsData['url']) ? (string) $sfsData['url'] : 'n/a',
                 ($sfsConfidence !== null) ? $sfsConfidence : 'n/a',
                 $minSfsConfidence,
                 $sfsShouldBlock ? '1' : '0',
@@ -263,6 +328,43 @@ class SpamblockPlugin extends Plugin
             }
 
             $ost->logDebug('Spamblock - SFS', $sfsMsg, true);
+
+            if ($spf) {
+                $spfData = $spf->getData();
+                $record = isset($spfData['record']) ? (string) $spfData['record'] : '';
+                if (strlen($record) > 240) {
+                    $record = substr($record, 0, 240) . '…';
+                }
+
+                $spfMsg = sprintf(
+                    'mid=%s from=%s domain=%s evaluated_domain=%s ip_used=%s spf_result=%s spf_raw=%s should_block=%s redirect_chain=%s fail_action=%s none_action=%s invalid_action=%s record=%s',
+                    $context->getMid(),
+                    $context->getFromEmail(),
+                    isset($spfData['domain']) ? (string) $spfData['domain'] : 'n/a',
+                    isset($spfData['evaluated_domain']) ? (string) $spfData['evaluated_domain'] : 'n/a',
+                    $context->getIp() ?: 'n/a',
+                    isset($spfData['result']) ? (string) $spfData['result'] : 'n/a',
+                    isset($spfData['raw']) ? (string) $spfData['raw'] : 'n/a',
+                    $spfShouldBlock ? '1' : '0',
+                    isset($spfData['redirect_chain']) && is_array($spfData['redirect_chain'])
+                        ? implode('->', $spfData['redirect_chain'])
+                        : 'n/a',
+                    $spfFailAction,
+                    $spfNoneAction,
+                    $spfInvalidAction,
+                    $record !== '' ? $record : 'n/a'
+                );
+
+                if ($spf->getError()) {
+                    $status = $spf->getStatusCode();
+                    $spfMsg .= sprintf(
+                        "\nerror=%s",
+                        $status ? sprintf('status=%s %s', $status, $spf->getError()) : $spf->getError()
+                    );
+                }
+
+                $ost->logDebug('Spamblock - SPF', $spfMsg, true);
+            }
         }
     }
 
@@ -289,6 +391,7 @@ class SpamblockPlugin extends Plugin
 
         $postmark = $check['postmark'] ?? null;
         $sfs = $check['sfs'] ?? null;
+        $spf = $check['spf'] ?? null;
 
         $postmarkScore = (is_array($postmark) && array_key_exists('score', $postmark))
             ? $postmark['score']
@@ -296,6 +399,10 @@ class SpamblockPlugin extends Plugin
 
         $sfsConfidence = (is_array($sfs) && array_key_exists('confidence', $sfs))
             ? $sfs['confidence']
+            : null;
+
+        $spfResult = (is_array($spf) && array_key_exists('result', $spf))
+            ? (string) $spf['result']
             : null;
 
         $wouldBlock = !empty($check['wouldBlock']);
@@ -306,7 +413,8 @@ class SpamblockPlugin extends Plugin
                 $ticket->getEmail(),
                 $wouldBlock,
                 $postmarkScore,
-                $sfsConfidence
+                $sfsConfidence,
+                $spfResult
             );
         }
 
@@ -338,6 +446,20 @@ class SpamblockPlugin extends Plugin
                 ),
                 true
             );
+
+            if (is_array($spf)) {
+                $ost->logDebug(
+                    'Spamblock - SPF',
+                    sprintf(
+                        'ticket=%s mid=%s result=%s should_block=%s',
+                        $ticket->getNumber(),
+                        $mid,
+                        $spfResult !== null ? $spfResult : 'n/a',
+                        !empty($spf['shouldBlock']) ? '1' : '0'
+                    ),
+                    true
+                );
+            }
         }
     }
 

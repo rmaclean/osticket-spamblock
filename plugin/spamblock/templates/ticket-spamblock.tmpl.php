@@ -14,6 +14,7 @@ $email = $meta ? (string) $meta['email'] : '';
 $isSpam = $meta ? (bool) $meta['is_spam'] : false;
 $postmarkScore = $meta ? $meta['postmark_score'] : null;
 $sfsConfidence = $meta ? $meta['sfs_confidence'] : null;
+$spfResult = $meta && array_key_exists('spf_result', $meta) ? $meta['spf_result'] : null;
 
 ?>
 <div style="padding: 10px 12px;">
@@ -41,6 +42,10 @@ $sfsConfidence = $meta ? $meta['sfs_confidence'] : null;
             <tr>
                 <td><?php echo __('SFS'); ?></td>
                 <td><?php echo ($sfsConfidence !== null) ? (string) $sfsConfidence : __('n/a'); ?></td>
+            </tr>
+            <tr>
+                <td><?php echo __('SPF'); ?></td>
+                <td><?php echo ($spfResult !== null && $spfResult !== '') ? (string) $spfResult : __('n/a'); ?></td>
             </tr>
         </tbody>
     </table>
