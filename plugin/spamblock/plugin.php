@@ -2,7 +2,7 @@
 
 return [
     'id' => 'spamblock',
-    'version' => '0.3.0',
+    'version' => '0.4.0',
     'name' => 'Spamblock',
     'author' => 'spamblock',
     'description' => 'Spam-check inbound email tickets and block them over a configurable score threshold.',
