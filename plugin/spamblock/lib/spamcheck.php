@@ -28,7 +28,12 @@ class SpamblockEmailContext
         $message = $vars['message'] ?? '';
 
         if (!is_string($message)) {
-            $message = (string) $message;
+            if (is_scalar($message) || $message === null) {
+                $message = (string) $message;
+            } else {
+                $encoded = json_encode($message);
+                $message = ($encoded !== false) ? $encoded : '';
+            }
         }
 
         $ip = '';
@@ -55,6 +60,10 @@ class SpamblockEmailContext
         $ip = trim((string) $candidate);
         if ($ip === '') {
             return '';
+        }
+
+        if (preg_match('/^\[([0-9a-fA-F:.]+)\](?::\d+)?$/', $ip, $m)) {
+            $ip = $m[1];
         }
 
         $ip = trim($ip, " \t\n\r\0\x0B[]()<>,;");
@@ -173,11 +182,17 @@ class SpamblockEmailContext
             return $this->message;
         }
 
-        if (preg_match("/(\r\n\r\n|\n\n)$/", $this->header)) {
-            return $this->header . $this->message;
+        $header = (string) $this->header;
+
+        if (preg_match("/(\r\n\r\n|\n\n)$/", $header)) {
+            return $header . $this->message;
         }
 
-        return $this->header . "\r\n\r\n" . $this->message;
+        if (preg_match("/(\r\n|\n)$/", $header)) {
+            return $header . "\r\n" . $this->message;
+        }
+
+        return $header . "\r\n\r\n" . $this->message;
     }
 }
 
@@ -231,9 +246,96 @@ interface SpamblockSpamCheckProvider
     public function check(SpamblockEmailContext $context);
 }
 
+interface SpamblockHttpClient
+{
+    public function request($method, $url, $timeout, $headers = [], $body = null);
+}
+
+class SpamblockStreamHttpClient implements SpamblockHttpClient
+{
+    public function request($method, $url, $timeout, $headers = [], $body = null)
+    {
+        $method = strtoupper(trim((string) $method));
+        $url = (string) $url;
+        $timeout = (int) $timeout;
+
+        $headerLines = [];
+        foreach ((array) $headers as $h) {
+            $h = trim((string) $h);
+            if ($h !== '') {
+                $headerLines[] = $h;
+            }
+        }
+
+        $httpOptions = [
+            'method' => $method,
+            'timeout' => $timeout,
+            'ignore_errors' => true,
+        ];
+
+        if ($headerLines) {
+            $httpOptions['header'] = implode("\r\n", $headerLines) . "\r\n";
+        }
+
+        if ($body !== null) {
+            $httpOptions['content'] = (string) $body;
+        }
+
+        $ctx = stream_context_create([
+            'http' => $httpOptions,
+        ]);
+
+        $fp = @fopen($url, 'r', false, $ctx);
+
+        $status = 0;
+        $headers = null;
+        $body = null;
+
+        if ($fp !== false) {
+            $meta = stream_get_meta_data($fp);
+            $headers = $meta['wrapper_data'] ?? null;
+
+            $read = stream_get_contents($fp);
+            $body = ($read === false) ? null : $read;
+
+            fclose($fp);
+        }
+
+        if (is_array($headers) && isset($headers[0])) {
+            $first = (string) $headers[0];
+            if (preg_match('/HTTP\/[0-9.]+\s+(\d{3})/', $first, $m)) {
+                $status = (int) $m[1];
+            }
+        }
+
+        if ($fp === false || $body === null) {
+            return [
+                'ok' => false,
+                'status' => $status,
+                'body' => null,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'status' => $status,
+            'body' => $body,
+        ];
+    }
+}
+
 class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
 {
     private const ENDPOINT = 'https://spamcheck.postmarkapp.com/filter';
+
+    private $http;
+
+    public function __construct($http = null)
+    {
+        $this->http = $http instanceof SpamblockHttpClient
+            ? $http
+            : new SpamblockStreamHttpClient();
+    }
 
     public function getName()
     {
@@ -255,27 +357,19 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
             );
         }
 
-        $httpOptions = [
-            'method' => 'POST',
-            'timeout' => 8,
-            'ignore_errors' => true,
-            'header' => "Content-Type: application/json\r\n" .
-                "User-Agent: spamblock/0.4.0\r\n",
-            'content' => $payload,
-        ];
+        $res = $this->http->request(
+            'POST',
+            self::ENDPOINT,
+            8,
+            [
+                'Content-Type: application/json',
+                'User-Agent: spamblock/0.4.0',
+            ],
+            $payload
+        );
 
-        $ctx = stream_context_create([
-            'http' => $httpOptions,
-        ]);
-
-        $responseHeaders = null;
-        $responseBody = @file_get_contents(self::ENDPOINT, false, $ctx);
-        if (isset($http_response_header)) {
-            $responseHeaders = $http_response_header;
-        }
-
-        $status = $this->extractStatusCode($responseHeaders);
-        if ($responseBody === false) {
+        $status = isset($res['status']) ? (int) $res['status'] : 0;
+        if (empty($res['ok'])) {
             return new SpamblockSpamCheckResult(
                 $this->getName(),
                 null,
@@ -283,6 +377,8 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
                 $status
             );
         }
+
+        $responseBody = isset($res['body']) ? (string) $res['body'] : '';
 
         if ($status < 200 || $status >= 300) {
             return new SpamblockSpamCheckResult(
@@ -319,24 +415,20 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
             $status
         );
     }
-
-    private function extractStatusCode($headers)
-    {
-        if (!$headers || !is_array($headers) || !$headers[0]) {
-            return 0;
-        }
-
-        if (preg_match('/HTTP\/[0-9.]+\s+(\d{3})/', $headers[0], $m)) {
-            return (int) $m[1];
-        }
-
-        return 0;
-    }
 }
 
 class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
 {
     private const ENDPOINT = 'https://api.stopforumspam.org/api';
+
+    private $http;
+
+    public function __construct($http = null)
+    {
+        $this->http = $http instanceof SpamblockHttpClient
+            ? $http
+            : new SpamblockStreamHttpClient();
+    }
 
     public function getName()
     {
@@ -374,25 +466,17 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
             'url' => $url,
         ];
 
-        $httpOptions = [
-            'method' => 'GET',
-            'timeout' => 8,
-            'ignore_errors' => true,
-            'header' => "User-Agent: spamblock/0.4.0\r\n",
-        ];
+        $res = $this->http->request(
+            'GET',
+            $url,
+            8,
+            [
+                'User-Agent: spamblock/0.4.0',
+            ]
+        );
 
-        $ctx = stream_context_create([
-            'http' => $httpOptions,
-        ]);
-
-        $responseHeaders = null;
-        $responseBody = @file_get_contents($url, false, $ctx);
-        if (isset($http_response_header)) {
-            $responseHeaders = $http_response_header;
-        }
-
-        $status = $this->extractStatusCode($responseHeaders);
-        if ($responseBody === false) {
+        $status = isset($res['status']) ? (int) $res['status'] : 0;
+        if (empty($res['ok'])) {
             return new SpamblockSpamCheckResult(
                 $this->getName(),
                 null,
@@ -401,6 +485,8 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
                 $debugData
             );
         }
+
+        $responseBody = isset($res['body']) ? (string) $res['body'] : '';
 
         if ($status < 200 || $status >= 300) {
             return new SpamblockSpamCheckResult(
@@ -464,19 +550,6 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
             $status,
             $data
         );
-    }
-
-    private function extractStatusCode($headers)
-    {
-        if (!$headers || !is_array($headers) || !$headers[0]) {
-            return 0;
-        }
-
-        if (preg_match('/HTTP\/[0-9.]+\s+(\d{3})/', $headers[0], $m)) {
-            return (int) $m[1];
-        }
-
-        return 0;
     }
 
     private function extractFloat($arr, $key)

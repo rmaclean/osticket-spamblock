@@ -15,9 +15,9 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         $ip = trim((string) $context->getIp());
 
         $domain = '';
-        if (strpos($email, '@') !== false) {
-            $parts = explode('@', $email);
-            $domain = strtolower(trim(end($parts)));
+        if (substr_count($email, '@') === 1) {
+            $parts = explode('@', $email, 2);
+            $domain = strtolower(trim($parts[1] ?? ''));
         }
 
         if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {

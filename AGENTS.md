@@ -21,6 +21,14 @@ This repository is for an osTicket plugin named `spamblock`.
 - Do not add comments unless they explain non-obvious logic.
 - If UI/CSS is added, use CSS Grid (do not use flexbox).
 - Avoid committing secrets; prefer environment variables and `.env` files (which should be gitignored).
+- All new work must include unit tests when reasonable, and CI must stay green.
+
+## Unit tests
+- Unit tests use PHPUnit.
+- Run unit tests locally (no local PHP required):
+  - `./scripts/test.sh`
+- Integration tests (hit real endpoints) are opt-in:
+  - `./scripts/test-integration.sh`
 
 ## osTicket plugin notes
 - osTicket discovers plugins from `include/plugins/`.

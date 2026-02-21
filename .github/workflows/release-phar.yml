@@ -41,6 +41,12 @@ jobs:
           coverage: none
           ini-values: phar.readonly=0
 
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run unit tests
+        run: composer test
+
       - name: Build PHAR
         run: php scripts/build-phar.php --tag "${{ env.RELEASE_TAG }}" --out dist/spamblock.phar
 
