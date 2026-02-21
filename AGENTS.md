@@ -25,7 +25,7 @@ This repository is for an osTicket plugin named `spamblock`.
 
 ## Unit tests
 - Unit tests use PHPUnit.
-- Run unit tests locally (no local PHP required):
+- Always run unit tests locally for any change (no local PHP required):
   - `./scripts/test.sh`
 - Integration tests (hit real endpoints) are opt-in:
   - `./scripts/test-integration.sh`

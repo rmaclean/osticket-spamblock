@@ -69,8 +69,12 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         );
     }
 
-    private function evaluateDomain($domain, $ip, $depth, array &$trace)
+    private function evaluateDomain($domain, $ip, $depth, &$trace = null)
     {
+        if (!is_array($trace)) {
+            $trace = [];
+        }
+
         if ($depth >= self::MAX_DEPTH) {
             $trace[] = sprintf('domain=%s depth=%s error=%s', $domain, $depth, 'SPF recursion limit exceeded');
 
@@ -192,8 +196,11 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         ];
     }
 
-    private function evaluateRecord($domain, $ip, $record, $depth, array &$trace)
+    private function evaluateRecord($domain, $ip, $record, $depth, &$trace = null)
     {
+        if (!is_array($trace)) {
+            $trace = [];
+        }
         $record = trim((string) $record);
         if (stripos($record, 'v=spf1') !== 0) {
             return [

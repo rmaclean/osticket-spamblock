@@ -345,6 +345,7 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
     public function check(SpamblockEmailContext $context)
     {
         $debugData = [
+            'url' => self::ENDPOINT,
             'url_called' => self::ENDPOINT,
             'method' => 'POST',
             'timeout_seconds' => 8,
@@ -478,6 +479,7 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
 
         $url = self::ENDPOINT . '?' . http_build_query($params);
         $debugData = [
+            'url' => $url,
             'url_called' => $url,
             'method' => 'GET',
             'timeout_seconds' => 8,
@@ -551,6 +553,7 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
         $maxConfidence = $confidences ? max($confidences) : null;
 
         $data = [
+            'url' => $url,
             'url_called' => $url,
             'method' => 'GET',
             'timeout_seconds' => 8,
