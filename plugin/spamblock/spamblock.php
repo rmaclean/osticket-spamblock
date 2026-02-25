@@ -168,6 +168,10 @@ class SpamblockPlugin extends Plugin
             ? $config->getSpfInvalidAction()
             : 'ignore';
 
+        $spfUnsupportedMechanismAction = ($config instanceof SpamblockConfig)
+            ? $config->getSpfUnsupportedMechanismAction()
+            : 'ignore';
+
         $context = SpamblockEmailContext::fromTicketVars($vars);
 
         $includeSpf = ($config instanceof SpamblockConfig)
@@ -200,6 +204,8 @@ class SpamblockPlugin extends Plugin
             $spfShouldBlock = $spfNoneAction === 'spam';
         } elseif ($spfResult === 'invalid') {
             $spfShouldBlock = $spfInvalidAction === 'spam';
+        } elseif ($spfResult === 'unsupported') {
+            $spfShouldBlock = $spfUnsupportedMechanismAction === 'spam';
         }
 
         $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock);
@@ -392,7 +398,7 @@ class SpamblockPlugin extends Plugin
                 $traceText = $traceLines ? ("\n" . implode("\n", $traceLines)) : '';
 
                 $spfMsg = sprintf(
-                    "ip_used=%s\nmid=%s from=%s\nspf_result=%s spf_raw=%s should_block=%s\nfail_action=%s none_action=%s invalid_action=%s%s",
+                    "ip_used=%s\nmid=%s from=%s\nspf_result=%s spf_raw=%s should_block=%s\nfail_action=%s none_action=%s invalid_action=%s unsupported_mechanism_action=%s%s",
                     $context->getIp() ?: 'n/a',
                     $context->getMid(),
                     $context->getFromEmail(),
@@ -402,6 +408,7 @@ class SpamblockPlugin extends Plugin
                     $spfFailAction,
                     $spfNoneAction,
                     $spfInvalidAction,
+                    $spfUnsupportedMechanismAction,
                     $traceText
                 );
 

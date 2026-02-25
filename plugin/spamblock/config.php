@@ -71,6 +71,16 @@ class SpamblockConfig extends PluginConfig
                     'choices' => self::CHOICES_IGNORE_SPAM,
                 ],
             ]),
+            'spf_unsupported_mechanism_action' => new ChoiceField([
+                'id' => 8,
+                'label' => __('SPF Unsupported Mechanism'),
+                'required' => true,
+                'default' => 'ignore',
+                'hint' => __('SPF record contains an unsupported mechanism.'),
+                'configuration' => [
+                    'choices' => self::CHOICES_IGNORE_SPAM,
+                ],
+            ]),
             'blocked_email_log_level' => new ChoiceField([
                 'id' => 7,
                 'label' => __('Blocked Email Log Level'),
@@ -127,11 +137,18 @@ class SpamblockConfig extends PluginConfig
         return $val ?: 'ignore';
     }
 
+    public function getSpfUnsupportedMechanismAction()
+    {
+        $val = (string) $this->get('spf_unsupported_mechanism_action');
+        return $val ?: 'ignore';
+    }
+
     public function isSpfEnabled()
     {
         return $this->getSpfFailAction() === 'spam'
             || $this->getSpfNoneAction() === 'spam'
-            || $this->getSpfInvalidAction() === 'spam';
+            || $this->getSpfInvalidAction() === 'spam'
+            || $this->getSpfUnsupportedMechanismAction() === 'spam';
     }
 
     public function getBlockedEmailLogLevel()

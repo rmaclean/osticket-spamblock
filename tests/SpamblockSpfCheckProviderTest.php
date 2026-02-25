@@ -60,7 +60,7 @@ final class SpamblockSpfCheckProviderTest extends TestCase
         $this->assertSame('fail', $out['result']);
     }
 
-    public function testEvaluateRecordUnsupportedMechanismIsInvalid(): void
+    public function testEvaluateRecordUnsupportedMechanismReturnsUnsupported(): void
     {
         $p = new SpamblockSpfCheckProvider();
         $out = $this->callPrivate($p, 'evaluateRecord', [
@@ -70,8 +70,16 @@ final class SpamblockSpfCheckProviderTest extends TestCase
             0,
         ]);
 
-        $this->assertSame('invalid', $out['result']);
-        $this->assertStringContainsString('Unsupported SPF mechanism', (string) $out['error']);
+        $this->assertSame('unsupported', $out['result']);
+        $this->assertSame('neutral', $out['raw']);
+        $this->assertNull($out['error']);
+    }
+
+    public function testDomainExistsWithValidDomain(): void
+    {
+        $p = new SpamblockSpfCheckProvider();
+        $result = $this->callPrivate($p, 'domainExists', ['example.com']);
+        $this->assertTrue($result);
     }
 
     private function callPrivate(object $obj, string $method, array $args)

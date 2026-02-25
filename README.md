@@ -26,7 +26,7 @@ Notes:
   - subject
   - Postmark spam score
   - StopForumSpam confidence
-  - SPF result (`pass`, `fail`, `none`, `invalid`)
+  - SPF result (`pass`, `fail`, `none`, `invalid`, `unsupported`)
   - whether it would be blocked
 - Blocks tickets when either:
   - `postmark_score >= min_block_score`, or
@@ -41,6 +41,7 @@ In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `SPF Check Fails` (Do Nothing / Treat as Spam)
 - `SPF Record Missing` (Do Nothing / Treat as Spam)
 - `SPF Record Invalid` (Do Nothing / Treat as Spam)
+- `SPF Unsupported Mechanism` (Do Nothing / Treat as Spam)
 
 ![Spamblock configuration](docs/images/configscreenshot.png)
 

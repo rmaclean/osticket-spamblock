@@ -311,12 +311,31 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 continue;
             }
 
+            if (stripos($t, 'exists:') === 0) {
+                $existsDomain = substr($t, strlen('exists:'));
+                $existsDomain = strtolower(trim($existsDomain));
+                if ($existsDomain === '') {
+                    return [
+                        'result' => 'invalid',
+                        'raw' => 'permerror',
+                        'error' => 'Invalid exists mechanism',
+                    ];
+                }
+
+                if ($this->domainExists($existsDomain)) {
+                    $matched = $qual;
+                    $matchedBy = 'exists:' . $existsDomain;
+                    break;
+                }
+                continue;
+            }
+
             $trace[] = sprintf('domain=%s unsupported_mechanism=%s', $domain, $t);
 
             return [
-                'result' => 'invalid',
-                'raw' => 'permerror',
-                'error' => 'Unsupported SPF mechanism: ' . $t,
+                'result' => 'unsupported',
+                'raw' => 'neutral',
+                'error' => null,
             ];
         }
 
@@ -495,5 +514,19 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         $maskByte = 0xFF << (8 - $bits);
 
         return (($ipByte & $maskByte) === ($subByte & $maskByte));
+    }
+
+    private function domainExists($domain)
+    {
+        if ($domain === '') {
+            return false;
+        }
+
+        if (!function_exists('dns_get_record')) {
+            return false;
+        }
+
+        $records = @dns_get_record($domain, DNS_A);
+        return $records !== false && !empty($records);
     }
 }
