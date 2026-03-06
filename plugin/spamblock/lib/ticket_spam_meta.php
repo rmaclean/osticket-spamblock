@@ -22,6 +22,7 @@ class SpamblockTicketSpamMeta
                 `postmark_score` double DEFAULT NULL,
                 `sfs_confidence` double DEFAULT NULL,
                 `spf_result` varchar(16) DEFAULT NULL,
+                `gemini_reasoning` text DEFAULT NULL,
                 `created` datetime NOT NULL,
                 `updated` datetime NOT NULL,
                 PRIMARY KEY (`ticket_id`),
@@ -40,23 +41,31 @@ class SpamblockTicketSpamMeta
 
     private static function ensureColumns($table)
     {
-        $res = db_query(sprintf(
-            'SHOW COLUMNS FROM `%s` LIKE %s',
-            $table,
-            db_input('spf_result')
-        ));
+        $columnsToEnsure = [
+            'spf_result' => 'ALTER TABLE `%s` ADD COLUMN `spf_result` varchar(16) DEFAULT NULL AFTER `sfs_confidence`',
+            'gemini_reasoning' => 'ALTER TABLE `%s` ADD COLUMN `gemini_reasoning` text DEFAULT NULL AFTER `spf_result`',
+        ];
 
-        if ($res && db_num_rows($res)) {
-            return true;
+        foreach ($columnsToEnsure as $column => $alterSqlPattern) {
+            $res = db_query(sprintf(
+                'SHOW COLUMNS FROM `%s` LIKE %s',
+                $table,
+                db_input($column)
+            ));
+
+            if ($res && db_num_rows($res)) {
+                continue;
+            }
+
+            if (!db_query(sprintf($alterSqlPattern, $table))) {
+                return false;
+            }
         }
 
-        return db_query(sprintf(
-            'ALTER TABLE `%s` ADD COLUMN `spf_result` varchar(16) DEFAULT NULL AFTER `sfs_confidence`',
-            $table
-        ));
+        return true;
     }
 
-    public static function upsert($ticketId, $email, $isSpam, $postmarkScore, $sfsConfidence, $spfResult = null)
+    public static function upsert($ticketId, $email, $isSpam, $postmarkScore, $sfsConfidence, $spfResult = null, $geminiReasoning = null)
     {
         if (!$ticketId) {
             return false;
@@ -65,15 +74,16 @@ class SpamblockTicketSpamMeta
         self::autoCreateTable();
 
         $sql = sprintf(
-            'REPLACE INTO `%s` (`ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`, `created`, `updated`)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())',
+            'REPLACE INTO `%s` (`ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`, `gemini_reasoning`, `created`, `updated`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())',
             TABLE_PREFIX . self::TABLE,
             db_input($ticketId),
             db_input((string) $email),
             db_input($isSpam ? 1 : 0),
             $postmarkScore === null ? 'NULL' : db_input((float) $postmarkScore),
             $sfsConfidence === null ? 'NULL' : db_input((float) $sfsConfidence),
-            $spfResult === null || $spfResult === '' ? 'NULL' : db_input((string) $spfResult)
+            $spfResult === null || $spfResult === '' ? 'NULL' : db_input((string) $spfResult),
+            $geminiReasoning === null || trim((string) $geminiReasoning) === '' ? 'NULL' : db_input((string) $geminiReasoning)
         );
 
         return db_query($sql);
@@ -88,7 +98,7 @@ class SpamblockTicketSpamMeta
         self::autoCreateTable();
 
         $sql = sprintf(
-            'SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`
+            'SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`, `gemini_reasoning`
             FROM `%s`
             WHERE `ticket_id`=%s',
             TABLE_PREFIX . self::TABLE,
@@ -109,6 +119,7 @@ class SpamblockTicketSpamMeta
             'postmark_score' => $row['postmark_score'] !== null ? (float) $row['postmark_score'] : null,
             'sfs_confidence' => $row['sfs_confidence'] !== null ? (float) $row['sfs_confidence'] : null,
             'spf_result' => $row['spf_result'] !== null ? (string) $row['spf_result'] : null,
+            'gemini_reasoning' => $row['gemini_reasoning'] !== null ? (string) $row['gemini_reasoning'] : null,
         ];
     }
 }

@@ -70,6 +70,8 @@ if (!function_exists('db_query')) {
                         'is_spam' => true,
                         'postmark_score' => true,
                         'sfs_confidence' => true,
+                        'spf_result' => true,
+                        'gemini_reasoning' => true,
                     ],
                     'rows' => [],
                 ];
@@ -115,7 +117,8 @@ if (!function_exists('db_query')) {
             }
 
             if (preg_match('/VALUES \(([^)]+)\)/i', $sql, $vm)) {
-                $values = array_map('trim', explode(',', $vm[1]));
+                $values = str_getcsv($vm[1], ',', "'");
+                $values = array_map('trim', $values);
                 $ticketId = (int) trim($values[0], "'\"");
 
                 $db['tables'][$table]['rows'][$ticketId] = [
@@ -125,13 +128,16 @@ if (!function_exists('db_query')) {
                     'postmark_score' => strtoupper($values[3]) === 'NULL' ? null : (float) trim($values[3], "'\""),
                     'sfs_confidence' => strtoupper($values[4]) === 'NULL' ? null : (float) trim($values[4], "'\""),
                     'spf_result' => strtoupper($values[5]) === 'NULL' ? null : trim($values[5], "'\""),
+                    'gemini_reasoning' => isset($values[6]) && strtoupper($values[6]) !== 'NULL'
+                        ? trim(stripslashes($values[6]), "'\"")
+                        : null,
                 ];
             }
 
             return true;
         }
 
-        if (preg_match('/^SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`\s+FROM `([^`]+)`\s+WHERE `ticket_id`=([0-9]+)/i', $sql, $m)) {
+        if (preg_match('/^SELECT `ticket_id`, `email`, `is_spam`, `postmark_score`, `sfs_confidence`, `spf_result`, `gemini_reasoning`\\s+FROM `([^`]+)`\\s+WHERE `ticket_id`=([0-9]+)/i', $sql, $m)) {
             $table = $m[1];
             $ticketId = (int) $m[2];
 

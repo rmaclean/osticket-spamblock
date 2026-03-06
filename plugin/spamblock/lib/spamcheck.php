@@ -606,7 +606,29 @@ class SpamblockSpamChecker
     {
         $results = [];
         foreach ($this->providers as $provider) {
-            $results[] = $provider->check($context);
+            try {
+                $results[] = $provider->check($context);
+            } catch (Throwable $e) {
+                $providerName = method_exists($provider, 'getName')
+                    ? (string) $provider->getName()
+                    : get_class($provider);
+                $message = trim($e->getMessage());
+                if ($message === '') {
+                    $message = 'Provider check threw ' . get_class($e);
+                } else {
+                    $message = sprintf(
+                        'Provider check threw %s: %s',
+                        get_class($e),
+                        $message
+                    );
+                }
+
+                $results[] = new SpamblockSpamCheckResult(
+                    $providerName,
+                    null,
+                    $message
+                );
+            }
         }
 
         return $results;

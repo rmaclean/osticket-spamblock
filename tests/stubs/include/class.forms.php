@@ -1,22 +1,36 @@
 <?php
 
-class TextboxField
+class StubFormField
 {
+    private $config;
+
     public function __construct($config)
     {
+        $this->config = $config;
+    }
+
+    public function get($key)
+    {
+        return $this->config[$key] ?? null;
     }
 }
 
-class BooleanField
+class PasswordField extends StubFormField
 {
-    public function __construct($config)
-    {
-    }
 }
 
-class ChoiceField
+class BooleanField extends StubFormField
 {
-    public function __construct($config)
-    {
-    }
+}
+
+class ChoiceField extends StubFormField
+{
+}
+
+class TextboxField extends StubFormField
+{
+}
+
+class TextareaField extends StubFormField
+{
 }

@@ -20,6 +20,7 @@ Notes:
 - Calls Postmark’s Spamcheck API (`https://spamcheck.postmarkapp.com/filter`).
 - Calls StopForumSpam (`https://api.stopforumspam.org/api`) with the sender email address and best-effort originating IP.
 - Optionally performs an SPF check using the sender domain + best-effort originating IP.
+- Optionally performs an AI spam review using Gemini with the full raw email as input.
 - Logs every checked email with:
   - message-id (`mid`)
   - sender (`from`)
@@ -27,32 +28,84 @@ Notes:
   - Postmark spam score
   - StopForumSpam confidence
   - SPF result (`pass`, `fail`, `none`, `invalid`, `unsupported`)
+  - Gemini classification (`spam` / `legitimate`) when Gemini returns a result
+  - Gemini reasoning when Gemini returns a result
   - whether it would be blocked
 - Blocks tickets when either:
   - `postmark_score >= min_block_score`, or
   - `sfs_confidence >= sfs_min_confidence`, or
-  - SPF result matches your configured SPF actions
+  - SPF result matches your configured SPF actions, or
+  - Gemini classifies the message as spam and `Gemini: when spam is detected` is set to `Treat as Spam`
+
+If Postmark, StopForumSpam, or Gemini have network/HTTP/API parsing errors, Spamblock fails open:
+- the ticket is **not** treated as spam based on that provider
+- the ticket flow continues
+- the provider error is kept in Spamblock’s debug logging for diagnosis
 
 ## Configuration
 In osTicket: Admin Panel → Manage → Plugins → Spamblock
-- `Minimum spam score to block`
-- `SFS Minimum Confidence (%)`
 - `Test Mode`
-- `SPF Check Fails` (Do Nothing / Treat as Spam)
-- `SPF Record Missing` (Do Nothing / Treat as Spam)
-- `SPF Record Invalid` (Do Nothing / Treat as Spam)
-- `SPF Unsupported Mechanism` (Do Nothing / Treat as Spam)
+- `Blocked email log level`
+- `Postmark: minimum score to block`
+- `StopForumSpam: minimum confidence (%)`
+- `SPF: check fails` (Do Nothing / Treat as Spam)
+- `SPF: record missing` (Do Nothing / Treat as Spam)
+- `SPF: record invalid` (Do Nothing / Treat as Spam)
+- `SPF: unsupported mechanism` (Do Nothing / Treat as Spam)
+- `Enable AI Spam Check`
+- `Gemini: when spam is detected` (Do Nothing / Treat as Spam)
+- `Gemini: API key`
+- `Company Description for AI`
+- `Spam Guidelines for AI`
+- `Legitimate Guidelines for AI`
+
+### Gemini / AI spam check
+Gemini is optional and is controlled by the `Enable AI Spam Check` setting.
+
+When enabled, Spamblock sends the full raw email to Gemini and asks it to return structured JSON:
+- `spam` (`true` / `false`)
+- `reasoning` (one sentence)
+
+The Gemini request currently uses:
+- model: `gemini-3-flash-preview`
+- thinking level: `high`
+- temperature: `0`
+
+The prompt is built from three configurable fields:
+- `Company Description for AI`
+- `Spam Guidelines for AI`
+- `Legitimate Guidelines for AI`
+
+These fields ship with defaults and can be overridden for your help desk.
+
+Important Gemini behavior:
+- If `Enable AI Spam Check` is off, Gemini is not called.
+- If `Enable AI Spam Check` is on **but** `Gemini: API key` is empty, Gemini is still skipped.
+- If Gemini returns a network/HTTP/response-format error, the ticket is **not** classified as spam from Gemini.
+
+### SPF optimization
+If all SPF actions are set to **Do Nothing**, SPF checks are skipped entirely.
+
+### Gemini action
+`Gemini: when spam is detected` controls what happens when Gemini successfully classifies a message as spam:
+- `Do Nothing`: Gemini still evaluates and logs the result, but does not block the ticket.
+- `Treat as Spam`: Gemini can cause the ticket to be blocked.
+
+### Provider error handling
+Postmark, StopForumSpam, and Gemini are all fail-open:
+- network errors do not block the ticket
+- non-2xx HTTP responses do not block the ticket
+- malformed/unusable API responses do not block the ticket
 
 ![Spamblock configuration](docs/images/configscreenshot.png)
-
-If all SPF actions are set to **Do Nothing**, SPF checks are skipped entirely.
 
 ### Test Mode
 When **Test Mode** is enabled, Spamblock will **not block** any inbound emails.
 
 Instead, it will emit a **warning** log entry for anything that *would have been blocked*:
 - Log title: `Spamblock - Would have blocked Email`
-- Contains: `email`, `system` (`Spamcheck` or `SFS`), and the `score`
+- Contains: `email`, `system` (`Spamcheck`, `SFS`, `SPF`, or `Gemini`), and the provider result
+- Gemini warning entries also include the returned reasoning text
 
 This lets you tune thresholds safely by observing what would be blocked before turning blocking on.
 
@@ -62,7 +115,8 @@ On the staff ticket view, Spamblock adds:
 
 ![Is Spam label in the ticket header](docs/images/spamlabelscreenshot.png)
 
-- A popup (via the ticket “More” menu and the label) that shows per-provider results (Spamcheck + SFS + SPF)
+- A popup (via the ticket “More” menu and the label) that shows per-provider results (Spamcheck + SFS + SPF + Gemini)
+- When Gemini returns a result, the popup also shows the Gemini reasoning text
 
 ![Spamblock popup](docs/images/spampopupscreenshot.png)
 
@@ -84,6 +138,7 @@ On startup, Spamblock creates (or updates) an osTicket Ticket Filter named `Spam
 ## Provider architecture (implementation detail)
 Spamblock is structured to support multiple spam-check providers internally.
 - Provider interface + Postmark + SFS live in `plugin/spamblock/lib/spamcheck.php`.
+- Gemini provider lives in `plugin/spamblock/lib/geminicheck.php`.
 - SPF provider lives in `plugin/spamblock/lib/spfcheck.php`.
 - Providers are composed into a collection. In the future, additional providers can be added to the provider list without changing any UI.
 

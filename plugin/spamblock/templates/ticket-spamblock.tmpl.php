@@ -15,6 +15,7 @@ $isSpam = $meta ? (bool) $meta['is_spam'] : false;
 $postmarkScore = $meta ? $meta['postmark_score'] : null;
 $sfsConfidence = $meta ? $meta['sfs_confidence'] : null;
 $spfResult = $meta && array_key_exists('spf_result', $meta) ? $meta['spf_result'] : null;
+$geminiReasoning = $meta && array_key_exists('gemini_reasoning', $meta) ? (string) $meta['gemini_reasoning'] : '';
 
 ?>
 <div style="padding: 10px 12px;">
@@ -47,8 +48,19 @@ $spfResult = $meta && array_key_exists('spf_result', $meta) ? $meta['spf_result'
                 <td><?php echo __('SPF'); ?></td>
                 <td><?php echo ($spfResult !== null && $spfResult !== '') ? (string) $spfResult : __('n/a'); ?></td>
             </tr>
+            <tr>
+                <td><?php echo __('Gemini'); ?></td>
+                <td><?php echo $geminiReasoning !== '' ? ($isSpam ? __('Spam') : __('Legitimate')) : __('n/a'); ?></td>
+            </tr>
         </tbody>
     </table>
+
+    <?php if ($geminiReasoning !== '') { ?>
+        <div style="margin: 0 0 10px;">
+            <strong><?php echo __('Gemini reasoning'); ?>:</strong>
+            <?php echo Format::htmlchars($geminiReasoning); ?>
+        </div>
+    <?php } ?>
 
     <?php if ($canMarkSpam) { ?>
         <form id="spamblock-mark-spam" method="post" action="ajax.php/spamblock/ticket/<?php echo $ticket->getId(); ?>/mark-spam">

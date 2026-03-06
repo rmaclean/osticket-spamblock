@@ -5,6 +5,7 @@ require_once INCLUDE_DIR . 'class.signal.php';
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/spamcheck.php';
+require_once __DIR__ . '/lib/geminicheck.php';
 require_once __DIR__ . '/lib/spfcheck.php';
 require_once __DIR__ . '/lib/ticket_filter.php';
 require_once __DIR__ . '/lib/ticket_spam_meta.php';
@@ -14,7 +15,9 @@ class SpamblockPlugin extends Plugin
     var $config_class = 'SpamblockConfig';
 
     private $spamChecker;
-    private $spamCheckerHasSpf;
+    private $spamCheckerHasSpf = false;
+    private $spamCheckerHasGemini = false;
+    private $spamCheckerGeminiConfigHash = '';
     private $recentChecks = [];
     private $spamblockConfig;
 
@@ -108,8 +111,26 @@ class SpamblockPlugin extends Plugin
         if ($includeSpf === false) {
             $wantSpf = false;
         }
+        $wantGemini = ($config instanceof SpamblockConfig)
+            ? ($config->isGeminiEnabled() && $config->getGeminiApiKey() !== '')
+            : false;
 
-        if (!isset($this->spamChecker) || $this->spamCheckerHasSpf !== $wantSpf) {
+        $geminiHash = '';
+        if ($wantGemini && $config instanceof SpamblockConfig) {
+            $geminiHash = md5((string) json_encode([
+                $config->getGeminiApiKey(),
+                $config->getGeminiCompanyDescription(),
+                $config->getGeminiSpamGuidelines(),
+                $config->getGeminiLegitimateGuidelines(),
+            ]));
+        }
+
+        if (
+            !isset($this->spamChecker)
+            || $this->spamCheckerHasSpf !== $wantSpf
+            || $this->spamCheckerHasGemini !== $wantGemini
+            || $this->spamCheckerGeminiConfigHash !== $geminiHash
+        ) {
             $providers = [
                 new SpamblockPostmarkSpamCheckProvider(),
                 new SpamblockStopForumSpamProvider(),
@@ -118,9 +139,19 @@ class SpamblockPlugin extends Plugin
             if ($wantSpf) {
                 $providers[] = new SpamblockSpfCheckProvider();
             }
+            if ($wantGemini && $config instanceof SpamblockConfig) {
+                $providers[] = new SpamblockGeminiSpamCheckProvider(
+                    $config->getGeminiApiKey(),
+                    $config->getGeminiCompanyDescription(),
+                    $config->getGeminiSpamGuidelines(),
+                    $config->getGeminiLegitimateGuidelines()
+                );
+            }
 
             $this->spamChecker = new SpamblockSpamChecker($providers);
             $this->spamCheckerHasSpf = $wantSpf;
+            $this->spamCheckerHasGemini = $wantGemini;
+            $this->spamCheckerGeminiConfigHash = $geminiHash;
         }
 
         return $this->spamChecker;
@@ -171,6 +202,9 @@ class SpamblockPlugin extends Plugin
         $spfUnsupportedMechanismAction = ($config instanceof SpamblockConfig)
             ? $config->getSpfUnsupportedMechanismAction()
             : 'ignore';
+        $geminiAction = ($config instanceof SpamblockConfig)
+            ? $config->getGeminiAction()
+            : 'ignore';
 
         $context = SpamblockEmailContext::fromTicketVars($vars);
 
@@ -207,8 +241,17 @@ class SpamblockPlugin extends Plugin
         } elseif ($spfResult === 'unsupported') {
             $spfShouldBlock = $spfUnsupportedMechanismAction === 'spam';
         }
+        $gemini = $byProvider['gemini'] ?? null;
+        $geminiData = $gemini ? $gemini->getData() : [];
+        $geminiSpam = (is_array($geminiData) && array_key_exists('spam', $geminiData) && is_bool($geminiData['spam']))
+            ? (bool) $geminiData['spam']
+            : null;
+        $geminiReasoning = (is_array($geminiData) && array_key_exists('reasoning', $geminiData) && is_string($geminiData['reasoning']))
+            ? trim((string) $geminiData['reasoning'])
+            : null;
+        $geminiShouldBlock = ($geminiSpam === true && $geminiAction === 'spam');
 
-        $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock);
+        $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock || $geminiShouldBlock);
         $shouldBlock = $testMode ? false : $wouldBlock;
 
         $triggered = [];
@@ -220,6 +263,9 @@ class SpamblockPlugin extends Plugin
         }
         if ($spfShouldBlock) {
             $triggered[] = 'spf';
+        }
+        if ($geminiShouldBlock) {
+            $triggered[] = 'gemini';
         }
 
         if ($ost && $triggered) {
@@ -274,6 +320,22 @@ class SpamblockPlugin extends Plugin
 
                     $this->logAtLevel($ost, $blockedEmailLogLevel, $warnTitle, $msg);
                 }
+
+                if ($t === 'gemini') {
+                    $msg = sprintf(
+                        'email=%s system=%s score=%s reasoning=%s',
+                        $context->getFromEmail(),
+                        'Gemini',
+                        $geminiSpam === null ? 'n/a' : ($geminiSpam ? 'spam' : 'legitimate'),
+                        $geminiReasoning !== null && $geminiReasoning !== '' ? $geminiReasoning : 'n/a'
+                    );
+
+                    if ($testMode) {
+                        $msg .= ' test_mode=1';
+                    }
+
+                    $this->logAtLevel($ost, $blockedEmailLogLevel, $warnTitle, $msg);
+                }
             }
         }
 
@@ -313,6 +375,17 @@ class SpamblockPlugin extends Plugin
                     'statusCode' => $spf->getStatusCode(),
                     'error' => $spf->getError(),
                     'data' => $spf->getData(),
+                ]
+                : null,
+            'gemini' => $gemini
+                ? [
+                    'spam' => $geminiSpam,
+                    'reasoning' => $geminiReasoning,
+                    'shouldBlock' => $geminiShouldBlock,
+                    'action' => $geminiAction,
+                    'statusCode' => $gemini->getStatusCode(),
+                    'error' => $gemini->getError(),
+                    'data' => $gemini->getData(),
                 ]
                 : null,
         ];
@@ -422,6 +495,35 @@ class SpamblockPlugin extends Plugin
 
                 $ost->logDebug('Spamblock - SPF', $spfMsg, true);
             }
+
+            if ($gemini) {
+                $geminiData = $gemini->getData();
+                $geminiMsg = sprintf(
+                    "url_called=%s\nmid=%s from=%s\nmodel=%s action=%s spam=%s should_block=%s\nreasoning=%s",
+                    (is_array($geminiData) && array_key_exists('url_called', $geminiData) && $geminiData['url_called'])
+                        ? (string) $geminiData['url_called']
+                        : 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent',
+                    $context->getMid(),
+                    $context->getFromEmail(),
+                    (is_array($geminiData) && array_key_exists('model', $geminiData) && $geminiData['model'])
+                        ? (string) $geminiData['model']
+                        : 'gemini-3-flash-preview',
+                    $geminiAction,
+                    $geminiSpam === null ? 'n/a' : ($geminiSpam ? 'true' : 'false'),
+                    $geminiShouldBlock ? '1' : '0',
+                    ($geminiReasoning !== null && $geminiReasoning !== '') ? $geminiReasoning : 'n/a'
+                );
+
+                if ($gemini->getError()) {
+                    $status = $gemini->getStatusCode();
+                    $geminiMsg .= sprintf(
+                        "\nerror=%s",
+                        $status ? sprintf('status=%s %s', $status, $gemini->getError()) : $gemini->getError()
+                    );
+                }
+
+                $ost->logDebug('Spamblock - Gemini', $geminiMsg, true);
+            }
         }
     }
 
@@ -449,6 +551,7 @@ class SpamblockPlugin extends Plugin
         $postmark = $check['postmark'] ?? null;
         $sfs = $check['sfs'] ?? null;
         $spf = $check['spf'] ?? null;
+        $gemini = $check['gemini'] ?? null;
 
         $postmarkScore = (is_array($postmark) && array_key_exists('score', $postmark))
             ? $postmark['score']
@@ -461,6 +564,9 @@ class SpamblockPlugin extends Plugin
         $spfResult = (is_array($spf) && array_key_exists('result', $spf))
             ? (string) $spf['result']
             : null;
+        $geminiReasoning = (is_array($gemini) && array_key_exists('reasoning', $gemini))
+            ? (string) $gemini['reasoning']
+            : null;
 
         $wouldBlock = !empty($check['wouldBlock']);
 
@@ -471,7 +577,8 @@ class SpamblockPlugin extends Plugin
                 $wouldBlock,
                 $postmarkScore,
                 $sfsConfidence,
-                $spfResult
+                $spfResult,
+                $geminiReasoning
             );
         }
 
@@ -571,6 +678,31 @@ class SpamblockPlugin extends Plugin
                 }
 
                 $ost->logDebug('Spamblock - SPF', $spfMsg, true);
+            }
+
+            if (is_array($gemini)) {
+                $geminiData = array_key_exists('data', $gemini) && is_array($gemini['data']) ? $gemini['data'] : [];
+                $geminiMsg = sprintf(
+                    "ticket=%s mid=%s\nmodel=%s action=%s spam=%s should_block=%s\nreasoning=%s",
+                    $ticketNumber,
+                    $mid,
+                    (array_key_exists('model', $geminiData) && $geminiData['model']) ? (string) $geminiData['model'] : 'gemini-3-flash-preview',
+                    (array_key_exists('action', $gemini) && $gemini['action']) ? (string) $gemini['action'] : 'ignore',
+                    (array_key_exists('spam', $gemini) && $gemini['spam'] !== null) ? ($gemini['spam'] ? 'true' : 'false') : 'n/a',
+                    !empty($gemini['shouldBlock']) ? '1' : '0',
+                    ($geminiReasoning !== null && trim($geminiReasoning) !== '') ? $geminiReasoning : 'n/a'
+                );
+
+                if (!empty($gemini['error'])) {
+                    $geminiMsg .= sprintf(
+                        "\nerror=%s",
+                        !empty($gemini['statusCode'])
+                            ? sprintf('status=%s %s', $gemini['statusCode'], $gemini['error'])
+                            : (string) $gemini['error']
+                    );
+                }
+
+                $ost->logDebug('Spamblock - Gemini', $geminiMsg, true);
             }
         }
     }

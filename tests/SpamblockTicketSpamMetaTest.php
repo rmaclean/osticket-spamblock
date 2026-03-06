@@ -10,12 +10,12 @@ final class SpamblockTicketSpamMetaTest extends TestCase
 {
     public function testUpsertRequiresTicketId(): void
     {
-        $this->assertFalse(SpamblockTicketSpamMeta::upsert(0, 'a@example.com', true, 1.0, 2.0, 'fail'));
+        $this->assertFalse(SpamblockTicketSpamMeta::upsert(0, 'a@example.com', true, 1.0, 2.0, 'fail', 'reason'));
     }
 
     public function testUpsertAndLookupRoundTrip(): void
     {
-        $ok = SpamblockTicketSpamMeta::upsert(123, 'a@example.com', true, 5.5, 88.0, 'fail');
+        $ok = SpamblockTicketSpamMeta::upsert(123, 'a@example.com', true, 5.5, 88.0, 'fail', 'Flagged due to phishing language.');
         $this->assertTrue($ok);
 
         $row = SpamblockTicketSpamMeta::lookup(123);
@@ -27,5 +27,6 @@ final class SpamblockTicketSpamMetaTest extends TestCase
         $this->assertSame(5.5, $row['postmark_score']);
         $this->assertSame(88.0, $row['sfs_confidence']);
         $this->assertSame('fail', $row['spf_result']);
+        $this->assertSame('Flagged due to phishing language.', $row['gemini_reasoning']);
     }
 }
