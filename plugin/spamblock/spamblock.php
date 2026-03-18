@@ -157,6 +157,18 @@ class SpamblockPlugin extends Plugin
         return $this->spamChecker;
     }
 
+    private function isEmailInSystemBanList($email)
+    {
+        $email = trim((string) $email);
+        if ($email === '') {
+            return false;
+        }
+
+        require_once INCLUDE_DIR . 'class.banlist.php';
+
+        return (bool) Banlist::isBanned($email);
+    }
+
     public function onTicketCreateBefore($object, &$vars)
     {
         if (!is_array($vars)) {
@@ -207,6 +219,20 @@ class SpamblockPlugin extends Plugin
             : 'ignore';
 
         $context = SpamblockEmailContext::fromTicketVars($vars);
+        if ($this->isEmailInSystemBanList($context->getFromEmail())) {
+            if ($ost && method_exists($ost, 'logDebug')) {
+                $ost->logDebug(
+                    'Spamblock - Skipped Checks',
+                    sprintf(
+                        'email=%s mid=%s reason=system_ban_list',
+                        $context->getFromEmail(),
+                        $context->getMid()
+                    ),
+                    true
+                );
+            }
+            return;
+        }
 
         $includeSpf = ($config instanceof SpamblockConfig)
             ? ($config->isSpfEnabled() && $context->getIp() !== '')

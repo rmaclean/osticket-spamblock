@@ -11,6 +11,7 @@ final class SpamblockPluginTest extends TestCase
     protected function setUp(): void
     {
         $GLOBALS['ost'] = new OstTestLogger();
+        Banlist::reset();
     }
 
     public function testOnTicketCreateBeforeSetsFieldsAndBlocksWhenOverThreshold(): void
@@ -86,6 +87,54 @@ final class SpamblockPluginTest extends TestCase
         $this->assertArrayNotHasKey('spamblock_provider', $vars);
         $this->assertArrayNotHasKey('spamblock_score', $vars);
         $this->assertArrayNotHasKey('spamblock_should_block', $vars);
+    }
+
+    public function testOnTicketCreateBeforeSkipsChecksForSystemBannedEmail(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+
+        Banlist::add('sender@example.com');
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', new FailingChecker());
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-system-banned@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertArrayNotHasKey('spamblock_provider', $vars);
+        $this->assertArrayNotHasKey('spamblock_score', $vars);
+        $this->assertArrayNotHasKey('spamblock_should_block', $vars);
+        $this->assertSame([], $this->getPrivate($plugin, 'recentChecks'));
+
+        $logger = $GLOBALS['ost'];
+        $this->assertInstanceOf(OstTestLogger::class, $logger);
+
+        $skipLogs = array_values(array_filter($logger->debug, function ($row) {
+            return isset($row[0]) && $row[0] === 'Spamblock - Skipped Checks';
+        }));
+
+        $this->assertCount(1, $skipLogs);
+        $this->assertStringContainsString('email=sender@example.com', $skipLogs[0][1]);
+        $this->assertStringContainsString('mid=<mid-system-banned@example.com>', $skipLogs[0][1]);
+        $this->assertStringContainsString('reason=system_ban_list', $skipLogs[0][1]);
     }
 
     public function testTestModeNeverBlocks(): void
@@ -388,6 +437,14 @@ final class FakeChecker
     public function check($context)
     {
         return $this->results;
+    }
+}
+
+final class FailingChecker
+{
+    public function check($context)
+    {
+        throw new RuntimeException('Spam checks should be skipped for system-banned email addresses.');
     }
 }
 
