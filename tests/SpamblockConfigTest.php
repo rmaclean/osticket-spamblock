@@ -20,10 +20,12 @@ final class SpamblockConfigTest extends TestCase
         $this->assertArrayHasKey('gemini_company_description', $options);
         $this->assertArrayHasKey('gemini_spam_guidelines', $options);
         $this->assertArrayHasKey('gemini_legitimate_guidelines', $options);
+        $this->assertArrayHasKey('esmtpsa_bypass_enabled', $options);
 
         $this->assertSame(false, $options['gemini_enabled']->get('default'));
         $this->assertSame('ignore', $options['gemini_action']->get('default'));
         $this->assertSame('Your company is a class leading business in <DESCRIBE BUSINESS>.', $options['gemini_company_description']->get('default'));
+        $this->assertSame(true, $options['esmtpsa_bypass_enabled']->get('default'));
     }
 
     public function testGeminiGettersUseDefaultsWhenUnset(): void
@@ -36,6 +38,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertStringContainsString('class leading business', $config->getGeminiCompanyDescription());
         $this->assertStringContainsString('Phishing:', $config->getGeminiSpamGuidelines());
         $this->assertStringContainsString('Business Queries:', $config->getGeminiLegitimateGuidelines());
+        $this->assertTrue($config->isEsmtpsaBypassEnabled());
     }
 
     public function testGeminiGettersReturnOverrides(): void
@@ -47,6 +50,7 @@ final class SpamblockConfigTest extends TestCase
         $config->set('gemini_company_description', 'Custom company');
         $config->set('gemini_spam_guidelines', 'Custom spam guidance');
         $config->set('gemini_legitimate_guidelines', 'Custom legitimate guidance');
+        $config->set('esmtpsa_bypass_enabled', false);
 
         $this->assertTrue($config->isGeminiEnabled());
         $this->assertSame('spam', $config->getGeminiAction());
@@ -54,6 +58,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertSame('Custom company', $config->getGeminiCompanyDescription());
         $this->assertSame('Custom spam guidance', $config->getGeminiSpamGuidelines());
         $this->assertSame('Custom legitimate guidance', $config->getGeminiLegitimateGuidelines());
+        $this->assertFalse($config->isEsmtpsaBypassEnabled());
     }
 
 }

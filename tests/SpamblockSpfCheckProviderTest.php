@@ -60,6 +60,20 @@ final class SpamblockSpfCheckProviderTest extends TestCase
         $this->assertSame('fail', $out['result']);
     }
 
+    public function testEvaluateRecordKeepsNeutralAsNeutral(): void
+    {
+        $p = new SpamblockSpfCheckProvider();
+        $out = $this->callPrivate($p, 'evaluateRecord', [
+            'example.com',
+            '198.51.100.10',
+            'v=spf1 ?all',
+            0,
+        ]);
+
+        $this->assertSame('neutral', $out['raw']);
+        $this->assertSame('neutral', $out['result']);
+    }
+
     public function testEvaluateRecordUnsupportedMechanismReturnsUnsupported(): void
     {
         $p = new SpamblockSpfCheckProvider();
@@ -80,6 +94,56 @@ final class SpamblockSpfCheckProviderTest extends TestCase
         $p = new SpamblockSpfCheckProvider();
         $result = $this->callPrivate($p, 'domainExists', ['example.com']);
         $this->assertTrue($result);
+    }
+
+    public function testCheckPrefersAuthenticationResultsOverDnsEvaluation(): void
+    {
+        $p = new SpamblockSpfCheckProvider();
+        $ctx = SpamblockEmailContext::fromTicketVars([
+            'mid' => '<m-auth-results@example.com>',
+            'email' => 'display@example.net',
+            'subject' => 'subj',
+            'header' => implode("\r\n", [
+                'Authentication-Results: mx.example.test; spf=pass smtp.mailfrom=bounce@example.test smtp.remote-ip=192.0.2.15',
+                '',
+                '',
+            ]),
+            'message' => 'hello',
+        ]);
+
+        $res = $p->check($ctx);
+
+        $this->assertSame('pass', $res->getData()['result']);
+        $this->assertSame('pass', $res->getData()['raw']);
+        $this->assertSame('192.0.2.15', $res->getData()['ip']);
+        $this->assertSame('example.test', $res->getData()['domain']);
+        $this->assertSame('bounce@example.test', $res->getData()['envelope_from']);
+        $this->assertSame('authentication-results', $res->getData()['source']);
+    }
+
+    public function testCheckFallsBackToReceivedSpfHeader(): void
+    {
+        $p = new SpamblockSpfCheckProvider();
+        $ctx = SpamblockEmailContext::fromTicketVars([
+            'mid' => '<m-received-spf@example.com>',
+            'email' => 'display@example.net',
+            'subject' => 'subj',
+            'header' => implode("\r\n", [
+                'Received-SPF: fail (mx.example.test: domain of bounce@example.test does not designate 198.51.100.10 as permitted sender) client-ip=198.51.100.10; envelope-from=bounce@example.test;',
+                '',
+                '',
+            ]),
+            'message' => 'hello',
+        ]);
+
+        $res = $p->check($ctx);
+
+        $this->assertSame('fail', $res->getData()['result']);
+        $this->assertSame('fail', $res->getData()['raw']);
+        $this->assertSame('198.51.100.10', $res->getData()['ip']);
+        $this->assertSame('example.test', $res->getData()['domain']);
+        $this->assertSame('bounce@example.test', $res->getData()['envelope_from']);
+        $this->assertSame('received-spf', $res->getData()['source']);
     }
 
     private function callPrivate(object $obj, string $method, array $args)

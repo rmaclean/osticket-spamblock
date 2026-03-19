@@ -11,13 +11,52 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
 
     public function check(SpamblockEmailContext $context)
     {
-        $email = trim((string) $context->getFromEmail());
+        $envelopeFrom = trim((string) $context->getEnvelopeFromEmail());
+        $email = $envelopeFrom !== '' ? $envelopeFrom : trim((string) $context->getFromEmail());
         $ip = trim((string) $context->getIp());
+        $trustedEvidence = $context->getSpfEvidence();
 
         $domain = '';
         if (substr_count($email, '@') === 1) {
             $parts = explode('@', $email, 2);
             $domain = strtolower(trim($parts[1] ?? ''));
+        }
+
+        if (is_array($trustedEvidence) && !empty($trustedEvidence['result'])) {
+            $trustedIp = trim((string) ($trustedEvidence['ip'] ?? ''));
+            $trustedEnvelopeFrom = trim((string) ($trustedEvidence['envelope_from'] ?? ''));
+            $trustedDomain = trim((string) ($trustedEvidence['domain'] ?? $domain));
+            $trustedRaw = strtolower(trim((string) ($trustedEvidence['raw'] ?? $trustedEvidence['result'])));
+            $trustedResult = trim((string) $trustedEvidence['result']);
+            $source = trim((string) ($trustedEvidence['source'] ?? 'header'));
+
+            return new SpamblockSpamCheckResult(
+                $this->getName(),
+                null,
+                null,
+                null,
+                [
+                    'result' => $trustedResult,
+                    'domain' => $trustedDomain,
+                    'evaluated_domain' => $trustedDomain,
+                    'redirect_chain' => [],
+                    'ip' => $trustedIp !== '' ? $trustedIp : $ip,
+                    'record' => null,
+                    'raw' => $trustedRaw,
+                    'source' => $source,
+                    'envelope_from' => $trustedEnvelopeFrom !== '' ? $trustedEnvelopeFrom : $envelopeFrom,
+                    'trace' => [
+                        sprintf(
+                            'source=%s raw=%s result=%s domain=%s ip=%s',
+                            $source,
+                            $trustedRaw !== '' ? $trustedRaw : 'n/a',
+                            $trustedResult !== '' ? $trustedResult : 'n/a',
+                            $trustedDomain !== '' ? $trustedDomain : 'n/a',
+                            $trustedIp !== '' ? $trustedIp : ($ip !== '' ? $ip : 'n/a')
+                        ),
+                    ],
+                ]
+            );
         }
 
         if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {
@@ -30,6 +69,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                     'result' => 'invalid',
                     'domain' => $domain,
                     'ip' => $ip,
+                    'source' => 'dns',
+                    'envelope_from' => $envelopeFrom,
                 ]
             );
         }
@@ -44,6 +85,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                     'result' => 'invalid',
                     'domain' => $domain,
                     'ip' => $ip,
+                    'source' => 'dns',
+                    'envelope_from' => $envelopeFrom,
                 ]
             );
         }
@@ -64,6 +107,8 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
                 'ip' => $ip,
                 'record' => $res['record'],
                 'raw' => $res['raw'],
+                'source' => 'dns',
+                'envelope_from' => $envelopeFrom,
                 'trace' => $trace,
             ]
         );
@@ -383,7 +428,7 @@ class SpamblockSpfCheckProvider implements SpamblockSpamCheckProvider
         }
 
         $simplified = $raw;
-        if ($raw === 'pass' || $raw === 'neutral') {
+        if ($raw === 'pass') {
             $simplified = 'pass';
         } elseif ($raw === 'fail' || $raw === 'softfail') {
             $simplified = 'fail';

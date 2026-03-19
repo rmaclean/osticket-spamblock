@@ -94,6 +94,12 @@ class SpamblockConfig extends PluginConfig
                     'choices' => self::CHOICES_IGNORE_SPAM,
                 ],
             ]),
+            'esmtpsa_bypass_enabled' => new BooleanField([
+                'id' => 15,
+                'label' => __('Enable ESMTPSA bypass'),
+                'default' => true,
+                'hint' => __('When enabled, Spamblock skips provider checks for messages whose top Received hop shows authenticated SMTP submission (ESMTPSA). Recommended: Enabled.'),
+            ]),
             'gemini_enabled' => new BooleanField([
                 'id' => 9,
                 'label' => __('Enable AI Spam Check'),
@@ -199,6 +205,16 @@ class SpamblockConfig extends PluginConfig
     {
         $val = (string) $this->get('spf_unsupported_mechanism_action');
         return $val ?: 'ignore';
+    }
+
+    public function isEsmtpsaBypassEnabled()
+    {
+        $val = $this->get('esmtpsa_bypass_enabled');
+        if ($val === null) {
+            return true;
+        }
+
+        return (bool) $val;
     }
 
     public function isSpfEnabled()

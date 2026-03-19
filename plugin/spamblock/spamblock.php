@@ -198,6 +198,9 @@ class SpamblockPlugin extends Plugin
         $blockedEmailLogLevel = ($config instanceof SpamblockConfig)
             ? $config->getBlockedEmailLogLevel()
             : 'warning';
+        $esmtpsaBypassEnabled = ($config instanceof SpamblockConfig)
+            ? $config->isEsmtpsaBypassEnabled()
+            : true;
 
         $spfFailAction = ($config instanceof SpamblockConfig)
             ? $config->getSpfFailAction()
@@ -231,6 +234,28 @@ class SpamblockPlugin extends Plugin
                     true
                 );
             }
+            return;
+        }
+
+        if ($esmtpsaBypassEnabled && $context->isAuthenticatedSubmission()) {
+            $vars['spamblock_provider'] = 'esmtpsa';
+            $vars['spamblock_score'] = '';
+            $vars['spamblock_should_block'] = '0';
+
+            if ($ost && method_exists($ost, 'logDebug')) {
+                $ost->logDebug(
+                    'Spamblock - Skipped Checks',
+                    sprintf(
+                        'email=%s mid=%s reason=esmtpsa_bypass ip=%s envelope_from=%s',
+                        $context->getFromEmail(),
+                        $context->getMid(),
+                        $context->getIp() ?: 'n/a',
+                        $context->getEnvelopeFromEmail() ?: 'n/a'
+                    ),
+                    true
+                );
+            }
+
             return;
         }
 
@@ -331,13 +356,14 @@ class SpamblockPlugin extends Plugin
                 }
 
                 if ($t === 'spf') {
+                    $spfIp = isset($spfData['ip']) && $spfData['ip'] ? (string) $spfData['ip'] : ($context->getIp() ?: 'n/a');
                     $msg = sprintf(
                         'email=%s system=%s score=%s domain=%s ip=%s',
                         $context->getFromEmail(),
                         'SPF',
                         $spfResult !== null ? $spfResult : 'n/a',
                         isset($spfData['domain']) ? (string) $spfData['domain'] : 'n/a',
-                        $context->getIp() ?: 'n/a'
+                        $spfIp
                     );
 
                     if ($testMode) {
@@ -495,14 +521,17 @@ class SpamblockPlugin extends Plugin
                 }
 
                 $traceText = $traceLines ? ("\n" . implode("\n", $traceLines)) : '';
+                $spfIp = isset($spfData['ip']) && $spfData['ip'] ? (string) $spfData['ip'] : ($context->getIp() ?: 'n/a');
 
                 $spfMsg = sprintf(
-                    "ip_used=%s\nmid=%s from=%s\nspf_result=%s spf_raw=%s should_block=%s\nfail_action=%s none_action=%s invalid_action=%s unsupported_mechanism_action=%s%s",
-                    $context->getIp() ?: 'n/a',
+                    "ip_used=%s\nmid=%s from=%s envelope_from=%s\nspf_result=%s spf_raw=%s source=%s should_block=%s\nfail_action=%s none_action=%s invalid_action=%s unsupported_mechanism_action=%s%s",
+                    $spfIp,
                     $context->getMid(),
                     $context->getFromEmail(),
+                    isset($spfData['envelope_from']) && $spfData['envelope_from'] ? (string) $spfData['envelope_from'] : 'n/a',
                     isset($spfData['result']) ? (string) $spfData['result'] : 'n/a',
                     isset($spfData['raw']) ? (string) $spfData['raw'] : 'n/a',
+                    isset($spfData['source']) ? (string) $spfData['source'] : 'n/a',
                     $spfShouldBlock ? '1' : '0',
                     $spfFailAction,
                     $spfNoneAction,

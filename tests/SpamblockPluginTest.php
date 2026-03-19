@@ -172,6 +172,87 @@ final class SpamblockPluginTest extends TestCase
         $this->assertSame('0', $vars['spamblock_should_block']);
     }
 
+    public function testEsmtpsaBypassSkipsAllChecksByDefault(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'spam');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', new FailingChecker('Spam checks should be skipped for ESMTPSA submissions.'));
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', true);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-esmtpsa@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "Received: from relay.example.test ([198.51.100.25]:43205) by ingress.example.test with esmtpsa envelope-from <bounce@example.test>;\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame('esmtpsa', $vars['spamblock_provider']);
+        $this->assertSame('', $vars['spamblock_score']);
+        $this->assertSame('0', $vars['spamblock_should_block']);
+        $this->assertSame([], $this->getPrivate($plugin, 'recentChecks'));
+
+        $logger = $GLOBALS['ost'];
+        $this->assertInstanceOf(OstTestLogger::class, $logger);
+        $skipLogs = array_values(array_filter($logger->debug, function ($row) {
+            return isset($row[0]) && $row[0] === 'Spamblock - Skipped Checks';
+        }));
+
+        $this->assertCount(1, $skipLogs);
+        $this->assertStringContainsString('reason=esmtpsa_bypass', $skipLogs[0][1]);
+    }
+
+    public function testEsmtpsaBypassCanBeDisabled(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('esmtpsa_bypass_enabled', false);
+
+        $checker = new CountingChecker([
+            new SpamblockSpamCheckResult('postmark', 0.1, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-esmtpsa-disabled@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "Received: from relay.example.test ([198.51.100.25]:43205) by ingress.example.test with esmtpsa envelope-from <bounce@example.test>;\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame(1, $checker->calls);
+        $this->assertSame('postmark', $vars['spamblock_provider']);
+        $this->assertSame('0', $vars['spamblock_should_block']);
+    }
+
     public function testBlockedEmailLogLevelDebugUsesDebug(): void
     {
         $plugin = new SpamblockPlugin();
@@ -442,9 +523,32 @@ final class FakeChecker
 
 final class FailingChecker
 {
+    private $message;
+
+    public function __construct($message = 'Spam checks should be skipped for system-banned email addresses.')
+    {
+        $this->message = $message;
+    }
     public function check($context)
     {
-        throw new RuntimeException('Spam checks should be skipped for system-banned email addresses.');
+        throw new RuntimeException($this->message);
+    }
+}
+
+final class CountingChecker
+{
+    public $calls = 0;
+    private $results;
+
+    public function __construct(array $results)
+    {
+        $this->results = $results;
+    }
+
+    public function check($context)
+    {
+        $this->calls++;
+        return $this->results;
     }
 }
 

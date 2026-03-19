@@ -8,15 +8,30 @@ class SpamblockEmailContext
     private $header;
     private $message;
     private $ip;
+    private $envelopeFrom;
+    private $spfEvidence;
+    private $authenticatedSubmission;
 
-    public function __construct($mid, $fromEmail, $subject, $header, $message, $ip = '')
-    {
+    public function __construct(
+        $mid,
+        $fromEmail,
+        $subject,
+        $header,
+        $message,
+        $ip = '',
+        $envelopeFrom = '',
+        $spfEvidence = [],
+        $authenticatedSubmission = false
+    ) {
         $this->mid = $mid;
         $this->fromEmail = $fromEmail;
         $this->subject = $subject;
         $this->header = $header;
         $this->message = $message;
         $this->ip = $ip;
+        $this->envelopeFrom = trim((string) $envelopeFrom);
+        $this->spfEvidence = is_array($spfEvidence) ? $spfEvidence : [];
+        $this->authenticatedSubmission = (bool) $authenticatedSubmission;
     }
 
     public static function fromTicketVars(array $vars)
@@ -36,6 +51,8 @@ class SpamblockEmailContext
             }
         }
 
+        $meta = self::extractHeaderMeta($header);
+
         $ip = '';
         foreach (['ip', 'ip_address', 'ipaddr', 'client_ip', 'clientip'] as $k) {
             if (empty($vars[$k])) {
@@ -48,11 +65,21 @@ class SpamblockEmailContext
             }
         }
 
-        if ($ip === '' && $header !== '') {
-            $ip = self::extractIpFromHeader($header);
+        if ($ip === '' && !empty($meta['ip'])) {
+            $ip = (string) $meta['ip'];
         }
 
-        return new self($mid, $fromEmail, $subject, $header, $message, $ip);
+        return new self(
+            $mid,
+            $fromEmail,
+            $subject,
+            $header,
+            $message,
+            $ip,
+            $meta['envelope_from'] ?? '',
+            $meta['spf'] ?? [],
+            !empty($meta['authenticated_submission'])
+        );
     }
 
     private static function normalizeIpCandidate($candidate)
@@ -93,67 +120,336 @@ class SpamblockEmailContext
 
     private static function extractIpFromHeader($header)
     {
-        $header = (string) $header;
+        $meta = self::extractHeaderMeta((string) $header);
+        return isset($meta['ip']) ? (string) $meta['ip'] : '';
+    }
 
-        $candidates = [];
+    private static function extractHeaderMeta($header)
+    {
+        $lines = self::getUnfoldedHeaderLines((string) $header);
+        $spfEvidence = self::extractTrustedSpfEvidenceFromLines($lines);
 
-        $simpleHeaderFields = [
-            'X-Originating-IP',
-            'X-Sender-IP',
-            'X-Client-IP',
-            'X-Real-IP',
-        ];
-
-        foreach ($simpleHeaderFields as $field) {
-            $re = '/^' . preg_quote($field, '/') . ':\s*\[?([^\]\s]+)\]?/mi';
-            if (preg_match($re, $header, $m)) {
-                $candidates[] = $m[1];
+        $ip = '';
+        foreach ([
+            $spfEvidence['ip'] ?? '',
+            self::extractReceivedIpFromLines($lines),
+            self::extractSimpleHeaderIpFromLines($lines),
+            self::extractLegacyIpFromLines($lines),
+        ] as $candidate) {
+            $candidate = self::normalizeIpCandidate($candidate);
+            if ($candidate !== '') {
+                $ip = $candidate;
+                break;
             }
         }
 
-        if (preg_match('/^X-Forwarded-For:\s*([^\r\n]+)/mi', $header, $m)) {
-            $xff = trim((string) $m[1]);
+        return [
+            'ip' => $ip,
+            'envelope_from' => self::extractEnvelopeFromLines($lines),
+            'spf' => $spfEvidence,
+            'authenticated_submission' => self::topReceivedUsesEsmtpsa($lines),
+        ];
+    }
+
+    private static function getUnfoldedHeaderLines($header)
+    {
+        if ($header === '') {
+            return [];
+        }
+
+        $rawLines = preg_split("/\r\n|\n|\r/", $header);
+        if (!$rawLines) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($rawLines as $line) {
+            if ($line === '') {
+                continue;
+            }
+
+            if (($line[0] === ' ' || $line[0] === "\t") && $lines) {
+                $lines[count($lines) - 1] .= ' ' . trim($line);
+                continue;
+            }
+
+            $lines[] = trim($line);
+        }
+
+        return $lines;
+    }
+
+    private static function getHeaderLines(array $lines, $fieldName)
+    {
+        $prefix = strtolower((string) $fieldName) . ':';
+        $matched = [];
+
+        foreach ($lines as $line) {
+            if (stripos($line, $prefix) === 0) {
+                $matched[] = $line;
+            }
+        }
+
+        return $matched;
+    }
+
+    private static function topReceivedUsesEsmtpsa(array $lines)
+    {
+        $receivedLines = self::getHeaderLines($lines, 'Received');
+        if (!$receivedLines) {
+            return false;
+        }
+
+        return preg_match('/\bwith\s+esmtpsa\b/i', $receivedLines[0]) === 1;
+    }
+
+    private static function extractEnvelopeFromLines(array $lines)
+    {
+        foreach (self::getHeaderLines($lines, 'Return-Path') as $line) {
+            $value = self::extractEmailAddress($line);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        foreach (self::getHeaderLines($lines, 'Authentication-Results') as $line) {
+            $value = self::extractEmailAddress(self::extractNamedValue($line, 'smtp.mailfrom'));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        foreach (self::getHeaderLines($lines, 'Received-SPF') as $line) {
+            $value = self::extractEmailAddress(self::extractNamedValue($line, 'envelope-from'));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        foreach (self::getHeaderLines($lines, 'Received') as $line) {
+            if (preg_match('/\benvelope-from\s*<([^>]+)>/i', $line, $m)) {
+                $value = self::extractEmailAddress($m[1]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private static function extractTrustedSpfEvidenceFromLines(array $lines)
+    {
+        foreach (self::getHeaderLines($lines, 'Authentication-Results') as $line) {
+            if (!preg_match('/\bspf=([a-z]+)/i', $line, $m)) {
+                continue;
+            }
+
+            $raw = strtolower(trim((string) $m[1]));
+            $envelopeFrom = self::extractEmailAddress(self::extractNamedValue($line, 'smtp.mailfrom'));
+            $ip = self::normalizeIpCandidate(
+                self::extractNamedValue($line, 'smtp.remote-ip')
+                    ?: self::extractNamedValue($line, 'client-ip')
+                    ?: self::extractNamedValue($line, 'sender-ip')
+            );
+
+            return [
+                'source' => 'authentication-results',
+                'raw' => $raw,
+                'result' => self::normalizeSpfResult($raw),
+                'ip' => $ip,
+                'envelope_from' => $envelopeFrom,
+                'domain' => self::extractDomainFromEmail($envelopeFrom),
+            ];
+        }
+
+        foreach (self::getHeaderLines($lines, 'Received-SPF') as $line) {
+            if (!preg_match('/^Received-SPF:\s*([a-z]+)/i', $line, $m)) {
+                continue;
+            }
+
+            $raw = strtolower(trim((string) $m[1]));
+            $envelopeFrom = self::extractEmailAddress(self::extractNamedValue($line, 'envelope-from'));
+            $ip = self::normalizeIpCandidate(self::extractNamedValue($line, 'client-ip'));
+
+            return [
+                'source' => 'received-spf',
+                'raw' => $raw,
+                'result' => self::normalizeSpfResult($raw),
+                'ip' => $ip,
+                'envelope_from' => $envelopeFrom,
+                'domain' => self::extractDomainFromEmail($envelopeFrom),
+            ];
+        }
+
+        return [];
+    }
+
+    private static function normalizeSpfResult($raw)
+    {
+        $raw = strtolower(trim((string) $raw));
+
+        if ($raw === 'fail' || $raw === 'softfail') {
+            return 'fail';
+        }
+
+        if (in_array($raw, ['pass', 'none', 'neutral'], true)) {
+            return $raw;
+        }
+
+        return 'invalid';
+    }
+
+    private static function extractReceivedIpFromLines(array $lines)
+    {
+        $fallback = '';
+
+        foreach (self::getHeaderLines($lines, 'Received') as $line) {
+            $candidates = self::extractAllIpsFromString($line);
+            foreach ($candidates as $candidate) {
+                if (self::isPublicIp($candidate)) {
+                    return $candidate;
+                }
+
+                if ($fallback === '') {
+                    $fallback = $candidate;
+                }
+            }
+        }
+
+        return $fallback;
+    }
+
+    private static function extractSimpleHeaderIpFromLines(array $lines)
+    {
+        $candidates = [];
+
+        foreach (['X-Originating-IP', 'X-Sender-IP', 'X-Client-IP', 'X-Real-IP'] as $field) {
+            foreach (self::getHeaderLines($lines, $field) as $line) {
+                $candidates[] = substr($line, strlen($field) + 1);
+            }
+        }
+
+        foreach (self::getHeaderLines($lines, 'X-Forwarded-For') as $line) {
+            $xff = trim((string) substr($line, strlen('X-Forwarded-For') + 1));
             $parts = preg_split('/\s*,\s*/', $xff);
-            if ($parts && isset($parts[0])) {
+            if ($parts && isset($parts[0]) && $parts[0] !== '') {
                 $candidates[] = $parts[0];
             }
         }
 
-        if (preg_match('/sender IP is\s*\[?([0-9a-fA-F:.]+)\]?/i', $header, $m)) {
-            $candidates[] = $m[1];
-        }
+        $fallback = '';
+        foreach ($candidates as $candidate) {
+            $candidate = self::normalizeIpCandidate($candidate);
+            if ($candidate === '') {
+                continue;
+            }
 
-        if (preg_match_all('/\b([0-9]{1,3}(?:\.[0-9]{1,3}){3})\b/', $header, $m)) {
-            foreach ($m[1] as $v) {
-                $candidates[] = $v;
+            if (self::isPublicIp($candidate)) {
+                return $candidate;
+            }
+
+            if ($fallback === '') {
+                $fallback = $candidate;
             }
         }
 
-        if (preg_match_all('/\b([0-9a-f]{0,4}:[0-9a-f:]{2,})\b/i', $header, $m)) {
-            foreach ($m[1] as $v) {
-                $candidates[] = $v;
+        return $fallback;
+    }
+
+    private static function extractLegacyIpFromLines(array $lines)
+    {
+        $joined = implode("\n", $lines);
+
+        if (preg_match('/sender IP is\s*\[?([0-9a-fA-F:.]+)\]?/i', $joined, $m)) {
+            $candidate = self::normalizeIpCandidate($m[1]);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        $allIps = self::extractAllIpsFromString($joined);
+        foreach ($allIps as $candidate) {
+            if (self::isPublicIp($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return $allIps ? $allIps[0] : '';
+    }
+
+    private static function extractAllIpsFromString($value)
+    {
+        $value = (string) $value;
+        $candidates = [];
+
+        if (preg_match_all('/\[((?:IPv6:)?[^\]]+)\]/i', $value, $m)) {
+            foreach ($m[1] as $candidate) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        if (preg_match_all('/\b([0-9]{1,3}(?:\.[0-9]{1,3}){3})\b/', $value, $m)) {
+            foreach ($m[1] as $candidate) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        if (preg_match_all('/\b([0-9a-f]{0,4}:[0-9a-f:]{2,})\b/i', $value, $m)) {
+            foreach ($m[1] as $candidate) {
+                $candidates[] = $candidate;
             }
         }
 
         $valid = [];
-        foreach ($candidates as $c) {
-            $n = self::normalizeIpCandidate($c);
-            if ($n === '') {
+        foreach ($candidates as $candidate) {
+            $normalized = self::normalizeIpCandidate($candidate);
+            if ($normalized === '' || in_array($normalized, $valid, true)) {
                 continue;
             }
 
-            if (!in_array($n, $valid, true)) {
-                $valid[] = $n;
-            }
+            $valid[] = $normalized;
         }
 
-        foreach ($valid as $v) {
-            if (self::isPublicIp($v)) {
-                return $v;
-            }
+        return $valid;
+    }
+
+    private static function extractNamedValue($line, $name)
+    {
+        $line = (string) $line;
+        $name = preg_quote((string) $name, '/');
+
+        if (!preg_match('/\b' . $name . '=("([^"]*)"|[^;\s]+)/i', $line, $m)) {
+            return '';
         }
 
-        return $valid ? $valid[0] : '';
+        $value = $m[2] ?? $m[1];
+        return trim((string) $value, " \t\n\r\0\x0B<>");
+    }
+
+    private static function extractEmailAddress($value)
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return '';
+        }
+
+        if (preg_match('/<?([A-Z0-9._%+\-]+@[A-Z0-9.\-]+)>?/i', $value, $m)) {
+            return strtolower(trim((string) $m[1]));
+        }
+
+        return '';
+    }
+
+    private static function extractDomainFromEmail($email)
+    {
+        $email = self::extractEmailAddress($email);
+        if ($email === '' || substr_count($email, '@') !== 1) {
+            return '';
+        }
+
+        $parts = explode('@', $email, 2);
+        return strtolower(trim((string) ($parts[1] ?? '')));
     }
 
     public function getMid()
@@ -174,6 +470,21 @@ class SpamblockEmailContext
     public function getIp()
     {
         return $this->ip;
+    }
+
+    public function getEnvelopeFromEmail()
+    {
+        return $this->envelopeFrom;
+    }
+
+    public function getSpfEvidence()
+    {
+        return $this->spfEvidence;
+    }
+
+    public function isAuthenticatedSubmission()
+    {
+        return $this->authenticatedSubmission;
     }
 
     public function getRawEmail()
