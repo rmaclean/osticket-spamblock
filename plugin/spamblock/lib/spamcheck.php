@@ -683,7 +683,7 @@ class SpamblockPostmarkSpamCheckProvider implements SpamblockSpamCheckProvider
             8,
             [
                 'Content-Type: application/json',
-                'User-Agent: spamblock/0.8.0',
+                'User-Agent: spamblock/0.9.0',
             ],
             $payload
         );
@@ -801,7 +801,7 @@ class SpamblockStopForumSpamProvider implements SpamblockSpamCheckProvider
             $url,
             8,
             [
-                'User-Agent: spamblock/0.8.0',
+                'User-Agent: spamblock/0.9.0',
             ]
         );
 
