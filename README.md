@@ -46,6 +46,7 @@ If Postmark, StopForumSpam, or Gemini have network/HTTP/API parsing errors, Spam
 In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `Test Mode`
 - `Blocked email log level`
+- `Add blocked emails to System Ban List`
 - `Postmark: minimum score to block`
 - `StopForumSpam: minimum confidence (%)`
 - `SPF: check fails` (Do Nothing / Treat as Spam)
@@ -58,6 +59,13 @@ In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `Company Description for AI`
 - `Spam Guidelines for AI`
 - `Legitimate Guidelines for AI`
+
+### System Ban List sync
+`Add blocked emails to System Ban List` is enabled by default.
+
+When enabled, any inbound email that Spamblock actually blocks is also added to osTicket’s System Ban List using the sender email address. In `Test Mode`, emails are not blocked, so they are not added to the ban list.
+
+If an email address exists in osTicket’s System Ban List, but its rule is disabled, Spamblock skips all spam checks for that sender and lets the email continue normally. This gives you a simple whitelist-style override when a sender was blocked incorrectly.
 
 ### Gemini / AI spam check
 Gemini is optional and is controlled by the `Enable AI Spam Check` setting.

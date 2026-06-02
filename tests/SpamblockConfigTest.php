@@ -21,11 +21,13 @@ final class SpamblockConfigTest extends TestCase
         $this->assertArrayHasKey('gemini_spam_guidelines', $options);
         $this->assertArrayHasKey('gemini_legitimate_guidelines', $options);
         $this->assertArrayHasKey('esmtpsa_bypass_enabled', $options);
+        $this->assertArrayHasKey('auto_ban_blocked_email', $options);
 
         $this->assertSame(false, $options['gemini_enabled']->get('default'));
         $this->assertSame('ignore', $options['gemini_action']->get('default'));
         $this->assertSame('Your company is a class leading business in <DESCRIBE BUSINESS>.', $options['gemini_company_description']->get('default'));
         $this->assertSame(true, $options['esmtpsa_bypass_enabled']->get('default'));
+        $this->assertSame(true, $options['auto_ban_blocked_email']->get('default'));
     }
 
     public function testGeminiGettersUseDefaultsWhenUnset(): void
@@ -39,6 +41,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertStringContainsString('Phishing:', $config->getGeminiSpamGuidelines());
         $this->assertStringContainsString('Business Queries:', $config->getGeminiLegitimateGuidelines());
         $this->assertTrue($config->isEsmtpsaBypassEnabled());
+        $this->assertTrue($config->shouldAutoBanBlockedEmail());
     }
 
     public function testGeminiGettersReturnOverrides(): void
@@ -51,6 +54,7 @@ final class SpamblockConfigTest extends TestCase
         $config->set('gemini_spam_guidelines', 'Custom spam guidance');
         $config->set('gemini_legitimate_guidelines', 'Custom legitimate guidance');
         $config->set('esmtpsa_bypass_enabled', false);
+        $config->set('auto_ban_blocked_email', false);
 
         $this->assertTrue($config->isGeminiEnabled());
         $this->assertSame('spam', $config->getGeminiAction());
@@ -59,6 +63,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertSame('Custom spam guidance', $config->getGeminiSpamGuidelines());
         $this->assertSame('Custom legitimate guidance', $config->getGeminiLegitimateGuidelines());
         $this->assertFalse($config->isEsmtpsaBypassEnabled());
+        $this->assertFalse($config->shouldAutoBanBlockedEmail());
     }
 
 }

@@ -16,6 +16,30 @@ class Banlist
         return true;
     }
 
+    public static function disable($email)
+    {
+        $email = self::normalize($email);
+        if ($email === '' || !array_key_exists($email, self::$emails)) {
+            return false;
+        }
+
+        self::$emails[$email] = false;
+
+        return true;
+    }
+
+    public static function enable($email)
+    {
+        $email = self::normalize($email);
+        if ($email === '' || !array_key_exists($email, self::$emails)) {
+            return false;
+        }
+
+        self::$emails[$email] = true;
+
+        return true;
+    }
+
     public static function remove($email)
     {
         unset(self::$emails[self::normalize($email)]);
@@ -35,7 +59,12 @@ class Banlist
 
     public static function includes($email)
     {
-        return self::isBanned($email);
+        $email = self::normalize($email);
+        if ($email === '') {
+            return false;
+        }
+
+        return array_key_exists($email, self::$emails);
     }
 
     public static function reset()

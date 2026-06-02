@@ -19,7 +19,6 @@ services:
       - "8080:80"
     volumes:
       - ./plugin:/var/www/html/include/plugins:rw
-      - ./.osticket/include/ost-config.php:/var/www/html/include/ost-config.php:rw
       - attachments:/var/www/html/attachments
 
 volumes:

@@ -9,6 +9,6 @@ if [[ ! -f "$CONFIG_FILE" || ! -s "$CONFIG_FILE" ]]; then
 fi
 
 chown -R www-data:www-data /var/www/html/include /var/www/html/attachments /var/www/html/scp || true
-chmod 0666 "$CONFIG_FILE" || true
+# chmod 0666 "$CONFIG_FILE" || true
 
 exec "$@"

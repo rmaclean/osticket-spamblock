@@ -50,6 +50,7 @@ final class SpamblockPluginTest extends TestCase
         $this->assertSame('postmark', $vars['spamblock_provider']);
         $this->assertSame('6', $vars['spamblock_score']);
         $this->assertSame('1', $vars['spamblock_should_block']);
+        $this->assertTrue(Banlist::includes('sender@example.com'));
     }
 
     public function testOnTicketCreateBeforeNoHeaderDoesNothing(): void
@@ -137,6 +138,57 @@ final class SpamblockPluginTest extends TestCase
         $this->assertStringContainsString('reason=system_ban_list', $skipLogs[0][1]);
     }
 
+    public function testOnTicketCreateBeforeSkipsChecksForDisabledSystemBanListEntry(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+
+        Banlist::add('trusted@example.com');
+        Banlist::disable('trusted@example.com');
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', new FailingChecker('Spam checks should be skipped for disabled system ban list entries.'));
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-disabled-system-banned@example.com>',
+            'email' => 'trusted@example.com',
+            'subject' => 'hi',
+            'header' => "From: trusted@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertArrayNotHasKey('spamblock_provider', $vars);
+        $this->assertArrayNotHasKey('spamblock_score', $vars);
+        $this->assertArrayNotHasKey('spamblock_should_block', $vars);
+        $this->assertSame([], $this->getPrivate($plugin, 'recentChecks'));
+        $this->assertTrue(Banlist::includes('trusted@example.com'));
+        $this->assertFalse(Banlist::isBanned('trusted@example.com'));
+
+        $logger = $GLOBALS['ost'];
+        $this->assertInstanceOf(OstTestLogger::class, $logger);
+
+        $skipLogs = array_values(array_filter($logger->debug, function ($row) {
+            return isset($row[0]) && $row[0] === 'Spamblock - Skipped Checks';
+        }));
+
+        $this->assertCount(1, $skipLogs);
+        $this->assertStringContainsString('email=trusted@example.com', $skipLogs[0][1]);
+        $this->assertStringContainsString('mid=<mid-disabled-system-banned@example.com>', $skipLogs[0][1]);
+        $this->assertStringContainsString('reason=disabled_system_ban_list', $skipLogs[0][1]);
+    }
+
     public function testTestModeNeverBlocks(): void
     {
         $plugin = new SpamblockPlugin();
@@ -170,6 +222,44 @@ final class SpamblockPluginTest extends TestCase
         $plugin->onTicketCreateBefore(null, $vars);
 
         $this->assertSame('0', $vars['spamblock_should_block']);
+        $this->assertFalse(Banlist::includes('sender@example.com'));
+    }
+
+    public function testBlockedEmailIsNotAddedToBanlistWhenSettingDisabled(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('auto_ban_blocked_email', false);
+
+        $checker = new FakeChecker([
+            new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-banlist-disabled@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame('1', $vars['spamblock_should_block']);
+        $this->assertFalse(Banlist::includes('sender@example.com'));
     }
 
     public function testEsmtpsaBypassSkipsAllChecksByDefault(): void

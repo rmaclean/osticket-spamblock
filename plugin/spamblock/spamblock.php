@@ -169,6 +169,30 @@ class SpamblockPlugin extends Plugin
         return (bool) Banlist::isBanned($email);
     }
 
+    private function isEmailInDisabledSystemBanList($email)
+    {
+        $email = trim((string) $email);
+        if ($email === '') {
+            return false;
+        }
+
+        require_once INCLUDE_DIR . 'class.banlist.php';
+
+        return (bool) Banlist::includes($email) && !(bool) Banlist::isBanned($email);
+    }
+
+    private function addEmailToSystemBanList($email)
+    {
+        $email = trim((string) $email);
+        if ($email === '') {
+            return false;
+        }
+
+        require_once INCLUDE_DIR . 'class.banlist.php';
+
+        return (bool) Banlist::add($email);
+    }
+
     public function onTicketCreateBefore($object, &$vars)
     {
         if (!is_array($vars)) {
@@ -198,6 +222,9 @@ class SpamblockPlugin extends Plugin
         $blockedEmailLogLevel = ($config instanceof SpamblockConfig)
             ? $config->getBlockedEmailLogLevel()
             : 'warning';
+        $autoBanBlockedEmail = ($config instanceof SpamblockConfig)
+            ? $config->shouldAutoBanBlockedEmail()
+            : true;
         $esmtpsaBypassEnabled = ($config instanceof SpamblockConfig)
             ? $config->isEsmtpsaBypassEnabled()
             : true;
@@ -228,6 +255,20 @@ class SpamblockPlugin extends Plugin
                     'Spamblock - Skipped Checks',
                     sprintf(
                         'email=%s mid=%s reason=system_ban_list',
+                        $context->getFromEmail(),
+                        $context->getMid()
+                    ),
+                    true
+                );
+            }
+            return;
+        }
+        if ($this->isEmailInDisabledSystemBanList($context->getFromEmail())) {
+            if ($ost && method_exists($ost, 'logDebug')) {
+                $ost->logDebug(
+                    'Spamblock - Skipped Checks',
+                    sprintf(
+                        'email=%s mid=%s reason=disabled_system_ban_list',
                         $context->getFromEmail(),
                         $context->getMid()
                     ),
@@ -391,6 +432,9 @@ class SpamblockPlugin extends Plugin
             }
         }
 
+        if ($shouldBlock && $autoBanBlockedEmail) {
+            $this->addEmailToSystemBanList($context->getFromEmail());
+        }
         $providerTag = $triggered
             ? implode(',', $triggered)
             : implode(',', array_keys($byProvider));

@@ -30,6 +30,12 @@ class SpamblockConfig extends PluginConfig
                     'choices' => self::CHOICES_LOG_LEVEL,
                 ],
             ]),
+            'auto_ban_blocked_email' => new BooleanField([
+                'id' => 16,
+                'label' => __('Add blocked emails to System Ban List'),
+                'default' => true,
+                'hint' => __('When enabled, Spamblock adds the sender email address to osTicket’s System Ban List whenever an inbound email is actually blocked. Recommended: Enabled.'),
+            ]),
             'min_block_score' => new TextboxField([
                 'id' => 1,
                 'label' => __('Postmark: minimum score to block'),
@@ -181,6 +187,15 @@ class SpamblockConfig extends PluginConfig
     public function getTestMode()
     {
         return (bool) $this->get('test_mode');
+    }
+    public function shouldAutoBanBlockedEmail()
+    {
+        $val = $this->get('auto_ban_blocked_email');
+        if ($val === null) {
+            return true;
+        }
+
+        return (bool) $val;
     }
 
     public function getSpfFailAction()
