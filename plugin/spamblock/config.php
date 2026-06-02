@@ -20,6 +20,12 @@ class SpamblockConfig extends PluginConfig
                 'hint' => __('When enabled, Spamblock will not block tickets; it will only log what would have been blocked.'),
                 'default' => false,
             ]),
+            'debug_logs' => new BooleanField([
+                'id' => 17,
+                'label' => __('Enable DEBUG logs'),
+                'default' => false,
+                'hint' => __('When enabled, Spamblock will write verbose debug details to the osTicket system log.'),
+            ]),
             'blocked_email_log_level' => new ChoiceField([
                 'id' => 7,
                 'label' => __('Blocked email log level'),
@@ -35,6 +41,12 @@ class SpamblockConfig extends PluginConfig
                 'label' => __('Add blocked emails to System Ban List'),
                 'default' => true,
                 'hint' => __('When enabled, Spamblock adds the sender email address to osTicket’s System Ban List whenever an inbound email is actually blocked. Recommended: Enabled.'),
+            ]),
+            'auto_remove_api_errors' => new BooleanField([
+                'id' => 18,
+                'label' => __('Automatically remove API Errors on block'),
+                'default' => false,
+                'hint' => __('When enabled, Spamblock automatically removes the "API Error (403)" log entries from osTicket\'s system logs when a ticket is blocked.'),
             ]),
             'min_block_score' => new TextboxField([
                 'id' => 1,
@@ -188,6 +200,10 @@ class SpamblockConfig extends PluginConfig
     {
         return (bool) $this->get('test_mode');
     }
+    public function isDebugLogsEnabled()
+    {
+        return (bool) $this->get('debug_logs');
+    }
     public function shouldAutoBanBlockedEmail()
     {
         $val = $this->get('auto_ban_blocked_email');
@@ -282,4 +298,9 @@ class SpamblockConfig extends PluginConfig
         $val = trim((string) $this->get('gemini_legitimate_guidelines'));
         return $val !== '' ? $val : self::DEFAULT_GEMINI_LEGITIMATE_GUIDELINES;
     }
+    public function shouldAutoRemoveApiErrors()
+    {
+        return (bool) $this->get('auto_remove_api_errors');
+    }
 }
+

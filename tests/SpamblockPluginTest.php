@@ -102,6 +102,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
         $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('debug_logs', true);
 
         Banlist::add('sender@example.com');
 
@@ -150,6 +151,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
         $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('debug_logs', true);
 
         Banlist::add('trusted@example.com');
         Banlist::disable('trusted@example.com');
@@ -274,6 +276,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
         $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('debug_logs', true);
 
         $this->setPrivate($plugin, 'spamblockConfig', $cfg);
         $this->setPrivate($plugin, 'spamChecker', new FailingChecker('Spam checks should be skipped for ESMTPSA submissions.'));
@@ -355,6 +358,7 @@ final class SpamblockPluginTest extends TestCase
         $cfg->set('spf_none_action', 'ignore');
         $cfg->set('spf_invalid_action', 'ignore');
         $cfg->set('blocked_email_log_level', 'debug');
+        $cfg->set('debug_logs', true);
 
         $checker = new FakeChecker([
             new SpamblockSpamCheckResult('postmark', 6.0, null, 200),

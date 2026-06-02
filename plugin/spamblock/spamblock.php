@@ -18,8 +18,22 @@ class SpamblockPlugin extends Plugin
     private $spamCheckerHasSpf = false;
     private $spamCheckerHasGemini = false;
     private $spamCheckerGeminiConfigHash = '';
+    private static $lastBlockedEmail = null;
     private $recentChecks = [];
     private $spamblockConfig;
+
+    private function logDebug($ost, $title, $message)
+    {
+        if (!$ost) {
+            return;
+        }
+
+        $config = $this->getSpamblockConfig();
+        $debugEnabled = ($config instanceof SpamblockConfig) ? $config->isDebugLogsEnabled() : false;
+        if ($debugEnabled && method_exists($ost, 'logDebug')) {
+            $ost->logDebug($title, $message, true);
+        }
+    }
 
     private function logAtLevel($ost, $level, $title, $message)
     {
@@ -29,8 +43,8 @@ class SpamblockPlugin extends Plugin
 
         $level = strtolower(trim((string) $level));
 
-        if ($level === 'debug' && method_exists($ost, 'logDebug')) {
-            $ost->logDebug($title, $message, true);
+        if ($level === 'debug') {
+            $this->logDebug($ost, $title, $message);
             return;
         }
 
@@ -95,6 +109,8 @@ class SpamblockPlugin extends Plugin
 
         Signal::connect('ticket.create.before', [$this, 'onTicketCreateBefore']);
         Signal::connect('ticket.created', [$this, 'onTicketCreated']);
+
+        Signal::connect('model.created', [$this, 'onSyslogCreated'], 'Syslog');
 
         Signal::connect('ticket.view.more', [$this, 'onTicketViewMore']);
         Signal::connect('ajax.scp', [$this, 'onAjaxScp']);
@@ -219,6 +235,10 @@ class SpamblockPlugin extends Plugin
             ? $config->getTestMode()
             : false;
 
+        $debugEnabled = ($config instanceof SpamblockConfig)
+            ? $config->isDebugLogsEnabled()
+            : false;
+
         $blockedEmailLogLevel = ($config instanceof SpamblockConfig)
             ? $config->getBlockedEmailLogLevel()
             : 'warning';
@@ -250,31 +270,27 @@ class SpamblockPlugin extends Plugin
 
         $context = SpamblockEmailContext::fromTicketVars($vars);
         if ($this->isEmailInSystemBanList($context->getFromEmail())) {
-            if ($ost && method_exists($ost, 'logDebug')) {
-                $ost->logDebug(
-                    'Spamblock - Skipped Checks',
-                    sprintf(
-                        'email=%s mid=%s reason=system_ban_list',
-                        $context->getFromEmail(),
-                        $context->getMid()
-                    ),
-                    true
-                );
-            }
+            $this->logDebug(
+                $ost,
+                'Spamblock - Skipped Checks',
+                sprintf(
+                    'email=%s mid=%s reason=system_ban_list',
+                    $context->getFromEmail(),
+                    $context->getMid()
+                )
+            );
             return;
         }
         if ($this->isEmailInDisabledSystemBanList($context->getFromEmail())) {
-            if ($ost && method_exists($ost, 'logDebug')) {
-                $ost->logDebug(
-                    'Spamblock - Skipped Checks',
-                    sprintf(
-                        'email=%s mid=%s reason=disabled_system_ban_list',
-                        $context->getFromEmail(),
-                        $context->getMid()
-                    ),
-                    true
-                );
-            }
+            $this->logDebug(
+                $ost,
+                'Spamblock - Skipped Checks',
+                sprintf(
+                    'email=%s mid=%s reason=disabled_system_ban_list',
+                    $context->getFromEmail(),
+                    $context->getMid()
+                )
+            );
             return;
         }
 
@@ -283,19 +299,17 @@ class SpamblockPlugin extends Plugin
             $vars['spamblock_score'] = '';
             $vars['spamblock_should_block'] = '0';
 
-            if ($ost && method_exists($ost, 'logDebug')) {
-                $ost->logDebug(
-                    'Spamblock - Skipped Checks',
-                    sprintf(
-                        'email=%s mid=%s reason=esmtpsa_bypass ip=%s envelope_from=%s',
-                        $context->getFromEmail(),
-                        $context->getMid(),
-                        $context->getIp() ?: 'n/a',
-                        $context->getEnvelopeFromEmail() ?: 'n/a'
-                    ),
-                    true
-                );
-            }
+            $this->logDebug(
+                $ost,
+                'Spamblock - Skipped Checks',
+                sprintf(
+                    'email=%s mid=%s reason=esmtpsa_bypass ip=%s envelope_from=%s',
+                    $context->getFromEmail(),
+                    $context->getMid(),
+                    $context->getIp() ?: 'n/a',
+                    $context->getEnvelopeFromEmail() ?: 'n/a'
+                )
+            );
 
             return;
         }
@@ -345,6 +359,9 @@ class SpamblockPlugin extends Plugin
 
         $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock || $geminiShouldBlock);
         $shouldBlock = $testMode ? false : $wouldBlock;
+        if ($shouldBlock) {
+            self::$lastBlockedEmail = $context->getFromEmail();
+        }
 
         $triggered = [];
         if ($postmarkShouldBlock) {
@@ -486,7 +503,7 @@ class SpamblockPlugin extends Plugin
                 : null,
         ];
 
-        if ($ost) {
+        if ($ost && $debugEnabled) {
             $postmarkData = $postmark ? $postmark->getData() : [];
             $postmarkUrl = (is_array($postmarkData) && array_key_exists('url_called', $postmarkData) && $postmarkData['url_called'])
                 ? (string) $postmarkData['url_called']
@@ -647,6 +664,11 @@ class SpamblockPlugin extends Plugin
         $check = $this->recentChecks[$mid];
         unset($this->recentChecks[$mid]);
 
+        $config = $this->getSpamblockConfig();
+        $debugEnabled = ($config instanceof SpamblockConfig)
+            ? $config->isDebugLogsEnabled()
+            : false;
+
         $postmark = $check['postmark'] ?? null;
         $sfs = $check['sfs'] ?? null;
         $spf = $check['spf'] ?? null;
@@ -681,7 +703,7 @@ class SpamblockPlugin extends Plugin
             );
         }
 
-        if ($ost && method_exists($ticket, 'getNumber')) {
+        if ($ost && $debugEnabled && method_exists($ticket, 'getNumber')) {
             $ticketNumber = $ticket->getNumber();
 
             $postmarkData = is_array($postmark) && array_key_exists('data', $postmark) && is_array($postmark['data'])
@@ -905,5 +927,37 @@ class SpamblockPlugin extends Plugin
                 Http::response(200, 'OK');
             })
         );
+    }
+
+    public function onSyslogCreated($syslog)
+    {
+        $config = $this->getSpamblockConfig();
+        if (!($config instanceof SpamblockConfig) || !$config->shouldAutoRemoveApiErrors()) {
+            return;
+        }
+
+        $blockedEmail = self::$lastBlockedEmail;
+        if ($blockedEmail === null || $blockedEmail === '') {
+            return;
+        }
+
+        $title = method_exists($syslog, 'get') ? (string) $syslog->get('title') : '';
+        $body  = method_exists($syslog, 'get') ? (string) $syslog->get('body')  : '';
+
+        if (strpos($title, 'API Error') === false) {
+            return;
+        }
+
+        if (strpos($body, $blockedEmail) === false) {
+            return;
+        }
+
+        $id = method_exists($syslog, 'get') ? (int) $syslog->get('id') : 0;
+        if ($id <= 0) {
+            return;
+        }
+
+        db_query(sprintf('DELETE FROM %s WHERE id=%d LIMIT 1', TABLE_PREFIX . 'syslog', $id));
+        self::$lastBlockedEmail = null;
     }
 }

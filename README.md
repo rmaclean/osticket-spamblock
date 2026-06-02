@@ -45,6 +45,7 @@ If Postmark, StopForumSpam, or Gemini have network/HTTP/API parsing errors, Spam
 ## Configuration
 In osTicket: Admin Panel → Manage → Plugins → Spamblock
 - `Test Mode`
+- `Enable DEBUG logs`
 - `Blocked email log level`
 - `Add blocked emails to System Ban List`
 - `Postmark: minimum score to block`
