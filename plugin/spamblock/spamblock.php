@@ -18,7 +18,6 @@ class SpamblockPlugin extends Plugin
     private $spamCheckerHasSpf = false;
     private $spamCheckerHasGemini = false;
     private $spamCheckerGeminiConfigHash = '';
-    private static $lastBlockedEmail = null;
     private $recentChecks = [];
     private $spamblockConfig;
 
@@ -109,8 +108,6 @@ class SpamblockPlugin extends Plugin
 
         Signal::connect('ticket.create.before', [$this, 'onTicketCreateBefore']);
         Signal::connect('ticket.created', [$this, 'onTicketCreated']);
-
-        Signal::connect('model.created', [$this, 'onSyslogCreated'], 'Syslog');
 
         Signal::connect('ticket.view.more', [$this, 'onTicketViewMore']);
         Signal::connect('ajax.scp', [$this, 'onAjaxScp']);
@@ -359,8 +356,12 @@ class SpamblockPlugin extends Plugin
 
         $wouldBlock = ($postmarkShouldBlock || $sfsShouldBlock || $spfShouldBlock || $geminiShouldBlock);
         $shouldBlock = $testMode ? false : $wouldBlock;
-        if ($shouldBlock) {
-            self::$lastBlockedEmail = $context->getFromEmail();
+        if ($shouldBlock && $config instanceof SpamblockConfig && $config->shouldAutoRemoveApiErrors()) {
+            $blockedEmail = $context->getFromEmail();
+            $plugin = $this;
+            register_shutdown_function(function () use ($blockedEmail, $plugin) {
+                $plugin->cleanupApiErrorLogs($blockedEmail);
+            });
         }
 
         $triggered = [];
@@ -929,35 +930,18 @@ class SpamblockPlugin extends Plugin
         );
     }
 
-    public function onSyslogCreated($syslog)
+    public function cleanupApiErrorLogs($email)
     {
-        $config = $this->getSpamblockConfig();
-        if (!($config instanceof SpamblockConfig) || !$config->shouldAutoRemoveApiErrors()) {
+        $email = trim((string) $email);
+        if ($email === '') {
             return;
         }
 
-        $blockedEmail = self::$lastBlockedEmail;
-        if ($blockedEmail === null || $blockedEmail === '') {
-            return;
-        }
-
-        $title = method_exists($syslog, 'get') ? (string) $syslog->get('title') : '';
-        $body  = method_exists($syslog, 'get') ? (string) $syslog->get('body')  : '';
-
-        if (strpos($title, 'API Error') === false) {
-            return;
-        }
-
-        if (strpos($body, $blockedEmail) === false) {
-            return;
-        }
-
-        $id = method_exists($syslog, 'get') ? (int) $syslog->get('id') : 0;
-        if ($id <= 0) {
-            return;
-        }
-
-        db_query(sprintf('DELETE FROM %s WHERE id=%d LIMIT 1', TABLE_PREFIX . 'syslog', $id));
-        self::$lastBlockedEmail = null;
+        $escaped = addslashes($email);
+        db_query(sprintf(
+            "DELETE FROM %s WHERE title LIKE '%%API Error%%' AND `log` LIKE '%%%s%%'",
+            TABLE_PREFIX . 'syslog',
+            $escaped
+        ));
     }
 }

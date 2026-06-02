@@ -19,7 +19,8 @@ services:
       - "8080:80"
     volumes:
       - ./plugin:/var/www/html/include/plugins:rw
-      - attachments:/var/www/html/attachments
+      - ./.osticket/include:/osticket-persist:rw
+      - attachments:/var/www/html/attachments:rw
 
 volumes:
   db:

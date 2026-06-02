@@ -23,6 +23,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertArrayHasKey('esmtpsa_bypass_enabled', $options);
         $this->assertArrayHasKey('auto_ban_blocked_email', $options);
         $this->assertArrayHasKey('debug_logs', $options);
+        $this->assertArrayHasKey('auto_remove_api_errors', $options);
 
         $this->assertSame(false, $options['gemini_enabled']->get('default'));
         $this->assertSame('ignore', $options['gemini_action']->get('default'));
@@ -45,6 +46,7 @@ final class SpamblockConfigTest extends TestCase
         $this->assertTrue($config->isEsmtpsaBypassEnabled());
         $this->assertTrue($config->shouldAutoBanBlockedEmail());
         $this->assertFalse($config->isDebugLogsEnabled());
+        $this->assertFalse($config->shouldAutoRemoveApiErrors());
     }
 
     public function testGeminiGettersReturnOverrides(): void
@@ -69,6 +71,25 @@ final class SpamblockConfigTest extends TestCase
         $this->assertFalse($config->isEsmtpsaBypassEnabled());
         $this->assertFalse($config->shouldAutoBanBlockedEmail());
         $this->assertTrue($config->isDebugLogsEnabled());
+        $this->assertFalse($config->shouldAutoRemoveApiErrors());
+    }
+
+    public function testShouldAutoRemoveApiErrorsDefaultsToFalse(): void
+    {
+        $config = new SpamblockConfig();
+
+        $this->assertFalse($config->shouldAutoRemoveApiErrors());
+
+        $options = $config->getOptions();
+        $this->assertSame(false, $options['auto_remove_api_errors']->get('default'));
+    }
+
+    public function testShouldAutoRemoveApiErrorsReturnsTrueWhenSet(): void
+    {
+        $config = new SpamblockConfig();
+        $config->set('auto_remove_api_errors', true);
+
+        $this->assertTrue($config->shouldAutoRemoveApiErrors());
     }
 
 }

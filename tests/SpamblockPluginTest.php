@@ -575,6 +575,153 @@ final class SpamblockPluginTest extends TestCase
         $this->assertSame([], $recent);
     }
 
+    public function testCleanupApiErrorLogsDeletesMatchingEntries(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $queriesBefore = $this->capturedQueryCount();
+
+        $plugin->cleanupApiErrorLogs('sender@example.com');
+
+        $queriesAfter = $this->capturedQueryCount();
+        $this->assertGreaterThan($queriesBefore, $queriesAfter);
+
+        $newQueries = array_slice($GLOBALS['__spamblock_db']['queries'], $queriesBefore);
+        $lastQuery = end($newQueries);
+
+        $this->assertIsString($lastQuery);
+        $this->assertStringContainsString('DELETE FROM', $lastQuery);
+        $this->assertStringContainsString('syslog', $lastQuery);
+        $this->assertStringContainsString("title LIKE '%API Error%'", $lastQuery);
+        $this->assertStringContainsString('`log`', $lastQuery);
+        $this->assertStringContainsString('sender@example.com', $lastQuery);
+    }
+
+    public function testCleanupApiErrorLogsDoesNothingWithEmptyEmail(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $queriesBefore = $this->capturedQueryCount();
+
+        $plugin->cleanupApiErrorLogs('');
+
+        $this->assertSame($queriesBefore, $this->capturedQueryCount());
+    }
+
+    public function testAutoRemoveApiErrorsRegistersShutdownFunctionWhenBlocking(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('auto_remove_api_errors', true);
+
+        $checker = new FakeChecker([
+            new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-shutdown@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame('1', $vars['spamblock_should_block']);
+    }
+
+    public function testAutoRemoveApiErrorsDoesNotRegisterShutdownWhenFeatureDisabled(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', false);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('auto_remove_api_errors', false);
+
+        $checker = new FakeChecker([
+            new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $queriesBefore = $this->capturedQueryCount();
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-disabled@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame('1', $vars['spamblock_should_block']);
+    }
+
+    public function testAutoRemoveApiErrorsDoesNotRegisterShutdownInTestMode(): void
+    {
+        $plugin = new SpamblockPlugin();
+
+        $cfg = new SpamblockConfig();
+        $cfg->set('min_block_score', '5.0');
+        $cfg->set('sfs_min_confidence', '90.0');
+        $cfg->set('test_mode', true);
+        $cfg->set('spf_fail_action', 'ignore');
+        $cfg->set('spf_none_action', 'ignore');
+        $cfg->set('spf_invalid_action', 'ignore');
+        $cfg->set('blocked_email_log_level', 'warning');
+        $cfg->set('auto_remove_api_errors', true);
+
+        $checker = new FakeChecker([
+            new SpamblockSpamCheckResult('postmark', 6.0, null, 200),
+        ]);
+
+        $this->setPrivate($plugin, 'spamblockConfig', $cfg);
+        $this->setPrivate($plugin, 'spamChecker', $checker);
+        $this->setPrivate($plugin, 'spamCheckerHasSpf', false);
+
+        $queriesBefore = $this->capturedQueryCount();
+
+        $vars = [
+            'emailId' => 1,
+            'mid' => '<mid-test-mode@example.com>',
+            'email' => 'sender@example.com',
+            'subject' => 'hi',
+            'header' => "From: sender@example.com\r\n\r\n",
+            'message' => 'hello',
+        ];
+        $plugin->onTicketCreateBefore(null, $vars);
+
+        $this->assertSame('0', $vars['spamblock_should_block']);
+    }
+
+    private function capturedQueryCount(): int
+    {
+        return count($GLOBALS['__spamblock_db']['queries'] ?? []);
+    }
+
     private function setPrivate(object $obj, string $prop, $value): void
     {
         $ref = new ReflectionClass($obj);
@@ -723,3 +870,4 @@ final class MessageStub
         return $this->mid;
     }
 }
+

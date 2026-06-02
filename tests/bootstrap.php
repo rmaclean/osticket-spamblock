@@ -43,6 +43,7 @@ if (!function_exists('db_input')) {
 if (!function_exists('db_query')) {
     $GLOBALS['__spamblock_db'] = [
         'tables' => [],
+        'queries' => [],
     ];
 
     function db_query($sql)
@@ -54,6 +55,8 @@ if (!function_exists('db_query')) {
         if (preg_match("/^SHOW TABLES LIKE '([^']+)'$/i", $sql, $m)) {
             $table = $m[1];
             $exists = array_key_exists($table, $db['tables']);
+            $db['queries'][] = $sql;
+
             return [
                 '__type' => 'show_tables',
                 'rows' => $exists ? [[0 => $table]] : [],
@@ -77,6 +80,8 @@ if (!function_exists('db_query')) {
                 ];
             }
 
+            $db['queries'][] = $sql;
+
             return true;
         }
 
@@ -85,6 +90,8 @@ if (!function_exists('db_query')) {
             $col = trim($m[2], "'\"");
 
             $has = isset($db['tables'][$table]) && isset($db['tables'][$table]['columns'][$col]);
+
+            $db['queries'][] = $sql;
 
             return [
                 '__type' => 'show_columns',
@@ -103,6 +110,7 @@ if (!function_exists('db_query')) {
             }
 
             $db['tables'][$table]['columns'][$col] = true;
+            $db['queries'][] = $sql;
             return true;
         }
 
@@ -134,6 +142,8 @@ if (!function_exists('db_query')) {
                 ];
             }
 
+            $db['queries'][] = $sql;
+
             return true;
         }
 
@@ -143,12 +153,15 @@ if (!function_exists('db_query')) {
 
             $row = $db['tables'][$table]['rows'][$ticketId] ?? null;
 
+            $db['queries'][] = $sql;
+
             return [
                 '__type' => 'select',
                 'rows' => $row ? [$row] : [],
             ];
         }
 
+        $db['queries'][] = $sql;
         return true;
     }
 }
